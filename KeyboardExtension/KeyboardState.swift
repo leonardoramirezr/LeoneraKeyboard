@@ -28,7 +28,9 @@ final class KeyboardState: ObservableObject {
     }
 
     func reload() {
-        configuration = ConfigurationStorage.load()
+        let loaded = ConfigurationStorage.load()
+        guard loaded != configuration else { return }
+        configuration = loaded
         rebuildRows()
     }
 

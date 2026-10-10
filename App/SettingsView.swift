@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject private var store: ConfigurationStore
+    @State private var haptics = HapticFeedback()
 
     private var settings: Binding<KeyboardSettings> { $store.configuration.settings }
 
@@ -19,11 +20,38 @@ struct SettingsView: View {
 
             Section {
                 Toggle("Vibración", isOn: settings.haptics)
+                if store.configuration.settings.haptics {
+                    Picker("Tipo", selection: settings.hapticStyle) {
+                        ForEach(HapticStyle.allCases) { style in
+                            Text(style.displayName).tag(style)
+                        }
+                    }
+                    VStack(alignment: .leading) {
+                        Text("Intensidad: \(Int((store.configuration.settings.hapticIntensity * 100).rounded())) %")
+                        Slider(value: settings.hapticIntensity, in: 0.1...1, step: 0.05, onEditingChanged: { editing in
+                            if !editing { playHapticPreview() }
+                        })
+                    }
+                    VStack(alignment: .leading) {
+                        Text("Duración: \(hapticDurationText)")
+                        Slider(value: settings.hapticDuration, in: 0...150, step: 5, onEditingChanged: { editing in
+                            if !editing { playHapticPreview() }
+                        })
+                    }
+                    Button {
+                        playHapticPreview()
+                    } label: {
+                        Label("Probar vibración", systemImage: "iphone.radiowaves.left.and.right")
+                    }
+                }
                 Toggle("Sonido de teclas", isOn: settings.keyClicks)
             } header: {
                 Text("Respuesta")
             } footer: {
-                Text("La vibración, el sonido y la acción «Pegar» requieren «Permitir acceso completo» en los ajustes del teclado.")
+                Text("Con duración «breve» se usa el pulso corto del sistema; con más duración, cada pulsación corta la vibración anterior para no hacer esperar al teclado. La vibración, el sonido y la acción «Pegar» requieren «Permitir acceso completo» en los ajustes del teclado.")
+            }
+            .onChange(of: store.configuration.settings.hapticStyle) { _ in
+                playHapticPreview()
             }
 
             Section {
@@ -43,5 +71,14 @@ struct SettingsView: View {
         }
         .navigationTitle("Ajustes del teclado")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var hapticDurationText: String {
+        let duration = Int(store.configuration.settings.hapticDuration)
+        return duration == 0 ? "breve" : "\(duration) ms"
+    }
+
+    private func playHapticPreview() {
+        haptics.play(store.configuration.settings)
     }
 }
