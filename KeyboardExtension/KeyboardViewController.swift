@@ -8,7 +8,8 @@ final class KeyboardViewController: UIInputViewController {
     private var heightConstraint: NSLayoutConstraint?
     private var lastShiftTap = Date.distantPast
     private let haptics = HapticFeedback()
-    private var configurationObserver: ConfigurationChangeObserver?
+    private var configurationObserver: DarwinNotificationObserver?
+    private let dictation = DictationController()
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -19,15 +20,16 @@ final class KeyboardViewController: UIInputViewController {
         // y en cuanto la app avisa de que guardó.
         NotificationCenter.default.addObserver(
             self,
-            selector: #selector(reloadConfiguration),
+            selector: #selector(hostDidBecomeActive),
             name: .NSExtensionHostDidBecomeActive,
             object: nil
         )
-        configurationObserver = ConfigurationChangeObserver { [weak self] in
+        configurationObserver = DarwinNotificationObserver(name: ConfigurationStorage.didChangeNotification) { [weak self] in
             self?.reloadConfiguration()
         }
+        setUpDictation()
 
-        let root = KeyboardRootView(state: state) { [weak self] action in
+        let root = KeyboardRootView(state: state, dictation: dictation) { [weak self] action in
             self?.perform(action)
         }
         let host = UIHostingController(rootView: root)
@@ -59,9 +61,22 @@ final class KeyboardViewController: UIInputViewController {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         state.showingEmoji = false
+        state.showingDictation = false
         state.needsInputModeSwitchKey = needsInputModeSwitchKey
         reloadConfiguration()
         updateAutoCapitalization()
+        // Si la app está grabando para el teclado, responde y se vuelve a mostrar el panel.
+        dictation.refresh()
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        dictation.keyboardWillDisappear()
+    }
+
+    @objc private func hostDidBecomeActive() {
+        reloadConfiguration()
+        dictation.refresh()
     }
 
     @objc private func reloadConfiguration() {
@@ -119,6 +134,11 @@ final class KeyboardViewController: UIInputViewController {
         case .emoji:
             state.showingEmoji = true
             return
+        case .dictation:
+            state.showingEmoji = false
+            state.showingDictation = true
+            dictation.refresh()
+            return
         case .paste:
             if hasFullAccess, let text = UIPasteboard.general.string, !text.isEmpty {
                 proxy.insertText(text)
@@ -142,6 +162,54 @@ final class KeyboardViewController: UIInputViewController {
         }
 
         updateAutoCapitalization()
+    }
+
+    // MARK: - Dictado
+
+    private func setUpDictation() {
+        dictation.insertText = { [weak self] text in
+            self?.insertDictatedText(text)
+        }
+        dictation.openURL = { [weak self] url in
+            self?.openContainingApp(url) ?? false
+        }
+        dictation.hasFullAccess = { [weak self] in
+            self?.hasFullAccess ?? false
+        }
+        dictation.onAppRecording = { [weak self] in
+            self?.state.showingEmoji = false
+            self?.state.showingDictation = true
+        }
+    }
+
+    /// Inserta el texto dictado separándolo con un espacio de la palabra anterior.
+    private func insertDictatedText(_ text: String) {
+        let proxy = textDocumentProxy
+        var text = text
+        if let last = proxy.documentContextBeforeInput?.last, !last.isWhitespace,
+           let first = text.first, !first.isPunctuation {
+            text = " " + text
+        }
+        proxy.insertText(text)
+        updateAutoCapitalization()
+    }
+
+    /// Las extensiones no pueden usar `UIApplication.shared`, así que se busca la
+    /// aplicación en la cadena de respondedores y se llama a
+    /// `openURL:options:completionHandler:` directamente.
+    private func openContainingApp(_ url: URL) -> Bool {
+        let selector = sel_registerName("openURL:options:completionHandler:")
+        var responder: UIResponder? = self
+        while let current = responder {
+            if current is UIApplication, current.responds(to: selector) {
+                typealias OpenURL = @convention(c) (NSObject, Selector, NSURL, NSDictionary, AnyObject?) -> Void
+                let open = unsafeBitCast(current.method(for: selector), to: OpenURL.self)
+                open(current, selector, url as NSURL, NSDictionary(), nil)
+                return true
+            }
+            responder = current.next
+        }
+        return false
     }
 
     private func toggleShift() {

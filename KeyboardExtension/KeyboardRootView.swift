@@ -2,11 +2,14 @@ import SwiftUI
 
 struct KeyboardRootView: View {
     @ObservedObject var state: KeyboardState
+    let dictation: DictationController
     let perform: (KeyAction) -> Void
 
     var body: some View {
         Group {
-            if state.showingEmoji {
+            if state.showingDictation {
+                DictationPanel(state: state, dictation: dictation, perform: perform)
+            } else if state.showingEmoji {
                 EmojiPanel(state: state, perform: perform)
             } else {
                 KeyboardGrid(rows: state.rows, rowHeight: state.rowHeight) { key in
@@ -33,6 +36,12 @@ struct KeyCell: View {
     @State private var isSwiping = false
     @State private var didRepeat = false
     @State private var repeatTimer: Timer?
+
+    init(key: KeyDefinition, state: KeyboardState, perform: @escaping (KeyAction) -> Void) {
+        self.key = key
+        _state = ObservedObject(wrappedValue: state)
+        self.perform = perform
+    }
 
     var body: some View {
         KeyCapView(

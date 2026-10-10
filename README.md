@@ -17,7 +17,7 @@ Pulsar dos veces mayúsculas activa el bloqueo de mayúsculas.
 ```
  1☺  2"  3#  4$  5%  6&  7/  8(  9)  0📋
  Q_  W\  Eé  R|  T<  Y>  Uú  Ií  Oó  P•
- Aá  S/  D:  F;  G[  H]  J¡  K!  L@  Ñ~
+ Aá  S/  D:  F;  G[  H]  J¡  K!  L@  Ñ🎤(dictar)
  ⇧    Z+  X-  C*  V¿  B?  N,  M.    ⌫(borrar palabra)
  ⌨︎(ocultar)      espacio          ⏎
 ```
@@ -37,8 +37,41 @@ La app incluye un editor donde se puede:
 - Restablecer la distribución por defecto.
 
 Acciones disponibles: texto, espacio, borrar, borrar palabra, mayúsculas, bloqueo
-de mayúsculas, intro, tabulador, ocultar teclado, siguiente teclado, emojis, pegar,
-copiar, cortar y mover el cursor.
+de mayúsculas, intro, tabulador, ocultar teclado, siguiente teclado, emojis, dictar,
+pegar, copiar, cortar y mover el cursor.
+
+## Dictado
+
+La acción **Dictar** (en la distribución por defecto, deslizando hacia abajo la
+tecla Ñ) cambia el teclado por una pantalla con un botón de grabar en el centro y
+un interruptor **Mejorar texto con IA**:
+
+1. Toca el botón para grabar y vuelve a tocarlo para terminar.
+2. El audio se envía a Groq (`/audio/transcriptions`) para convertirlo en texto
+   con el modelo de voz a texto elegido.
+3. Con el interruptor activado, la transcripción se envía después al LLM elegido
+   (`/chat/completions`) con un prompt que corrige la puntuación, los signos, la
+   ortografía y que el texto tenga sentido.
+4. El texto se escribe donde está el cursor.
+
+En la app, **Dictado** permite configurar la API key, una URL de API personalizada
+(cualquier servicio compatible con la API de OpenAI), los modelos de voz a texto y
+LLM (se pueden escribir o elegir de la lista que devuelve la API), el idioma del
+audio y el prompt. Por defecto se usan `whisper-large-v3-turbo` y
+`openai/gpt-oss-120b`. Estos ajustes se guardan aparte y no se incluyen al exportar
+la configuración, para no compartir la API key.
+
+iOS normalmente no deja que un teclado use el micrófono, así que la app graba por
+él: la primera vez que dictas, el teclado abre Leonera Keyboard, que activa el
+micrófono y empieza a grabar; vuelve a la app anterior (botón «◀︎» de la barra de
+estado) y termina la grabación desde el teclado. El micrófono queda activo en
+segundo plano (con el indicador naranja) para los siguientes dictados y se
+desactiva tras 5 minutos sin usarlo o desde la app. Si el sistema sí permite
+grabar desde el teclado, se graba directamente sin abrir la app.
+
+Dictar requiere **Permitir acceso completo** y permiso de micrófono. Si ya tenías
+una distribución guardada, la tecla Ñ no cambia: añade la acción «Dictar» a la
+tecla que quieras desde el editor o restablece la distribución por defecto.
 
 La app guarda la configuración en un App Group compartido
 (`group.com.leonera.keyboard`) y la extensión la vuelve a leer cada vez que
@@ -49,14 +82,14 @@ app avisa de un cambio, así que los ajustes se aplican sin reiniciar el teclado
 
 1. Instala la app.
 2. Ajustes › General › Teclado › Teclados › Añadir teclado › **Leonera**.
-3. Activa **Permitir acceso completo** para pegar, vibración/sonido y para que el
-   teclado lea la distribución personalizada desde la app.
+3. Activa **Permitir acceso completo** para pegar, vibración/sonido, dictar y para
+   que el teclado lea la distribución personalizada desde la app.
 
 ## Estructura
 
 | Carpeta | Contenido |
 | --- | --- |
-| `Shared/` | Modelo, distribución por defecto, almacenamiento y vista de tecla (compartidos) |
+| `Shared/` | Modelo, distribución por defecto, almacenamiento, vista de tecla, grabación y cliente de Groq (compartidos) |
 | `KeyboardExtension/` | Extensión de teclado (`UIInputViewController` + SwiftUI) |
 | `App/` | App contenedora: instrucciones, prueba y editor |
 | `project.yml` | Definición del proyecto para [XcodeGen](https://github.com/yonaskolb/XcodeGen) |

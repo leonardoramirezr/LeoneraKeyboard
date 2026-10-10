@@ -14,6 +14,7 @@ enum KeyActionType: String, Codable, CaseIterable, Identifiable {
     case dismissKeyboard
     case nextKeyboard
     case emoji
+    case dictation
     case paste
     case copy
     case cut
@@ -37,6 +38,7 @@ enum KeyActionType: String, Codable, CaseIterable, Identifiable {
         case .dismissKeyboard: return "Ocultar teclado"
         case .nextKeyboard: return "Siguiente teclado"
         case .emoji: return "Emojis"
+        case .dictation: return "Dictar"
         case .paste: return "Pegar"
         case .copy: return "Copiar selección"
         case .cut: return "Cortar selección"
@@ -59,6 +61,7 @@ enum KeyActionType: String, Codable, CaseIterable, Identifiable {
         case .dismissKeyboard: return "keyboard.chevron.compact.down"
         case .nextKeyboard: return "globe"
         case .emoji: return "face.smiling"
+        case .dictation: return "mic"
         case .paste: return "doc.on.clipboard"
         case .copy: return "doc.on.doc"
         case .cut: return "scissors"

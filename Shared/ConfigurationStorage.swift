@@ -26,11 +26,14 @@ enum ConfigurationStorage {
         return .standard
     }
 
-    private static var fileURL: URL? {
+    /// Carpeta del App Group compartida entre la app y la extensión.
+    static var containerURL: URL? {
         guard let group = appGroupIdentifier else { return nil }
-        return FileManager.default
-            .containerURL(forSecurityApplicationGroupIdentifier: group)?
-            .appendingPathComponent(fileName)
+        return FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group)
+    }
+
+    private static var fileURL: URL? {
+        containerURL?.appendingPathComponent(fileName)
     }
 
     static func load() -> KeyboardConfiguration {
@@ -49,43 +52,10 @@ enum ConfigurationStorage {
             try? data.write(to: url, options: .atomic)
         }
         defaults.set(data, forKey: key)
-        CFNotificationCenterPostNotification(
-            CFNotificationCenterGetDarwinNotifyCenter(),
-            CFNotificationName(didChangeNotification as CFString),
-            nil, nil, true
-        )
+        DarwinNotification.post(didChangeNotification)
     }
 
     private static func decode(_ data: Data) -> KeyboardConfiguration? {
         try? JSONDecoder().decode(KeyboardConfiguration.self, from: data)
-    }
-}
-
-/// Llama a `handler` en el hilo principal cada vez que otro proceso guarda la
-/// configuración, para que el teclado se actualice aunque esté visible.
-final class ConfigurationChangeObserver {
-    private let handler: () -> Void
-
-    init(handler: @escaping () -> Void) {
-        self.handler = handler
-        CFNotificationCenterAddObserver(
-            CFNotificationCenterGetDarwinNotifyCenter(),
-            Unmanaged.passUnretained(self).toOpaque(),
-            { _, observer, _, _, _ in
-                guard let observer else { return }
-                let this = Unmanaged<ConfigurationChangeObserver>.fromOpaque(observer).takeUnretainedValue()
-                DispatchQueue.main.async { this.handler() }
-            },
-            ConfigurationStorage.didChangeNotification as CFString,
-            nil,
-            .deliverImmediately
-        )
-    }
-
-    deinit {
-        CFNotificationCenterRemoveEveryObserver(
-            CFNotificationCenterGetDarwinNotifyCenter(),
-            Unmanaged.passUnretained(self).toOpaque()
-        )
     }
 }
