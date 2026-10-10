@@ -65,6 +65,7 @@ final class KeyboardViewController: UIInputViewController {
         state.needsInputModeSwitchKey = needsInputModeSwitchKey
         reloadConfiguration()
         updateAutoCapitalization()
+        if hasFullAccess { ConfigurationStorage.markKeyboardAccess() }
         // Si la app está grabando para el teclado, responde y se vuelve a mostrar el panel.
         dictation.refresh()
     }

@@ -121,7 +121,11 @@ Si un push a `main` incluye varios commits, se publica una sola release con el
 El IPA no está firmado: para instalarlo hay que firmarlo (por ejemplo con
 AltStore, Sideloadly o tu propio certificado). Asegúrate de que la herramienta
 conserve el App Group; si no, el teclado funcionará con la distribución por
-defecto pero no verá los cambios hechos en la app.
+defecto pero no verá los cambios hechos en la app ni la API key del dictado. Si la
+herramienta cambia el nombre del App Group (AltStore y SideStore, por ejemplo,
+le añaden el ID del equipo), la app y el teclado lo detectan solos a partir de
+`ALTAppGroups` o del perfil de aprovisionamiento. En la app, **Dictado ›
+Conexión con el teclado** indica si ambos comparten los ajustes.
 
 ### En local (macOS)
 

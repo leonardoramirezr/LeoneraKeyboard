@@ -9,9 +9,12 @@ struct DictationSettingsView: View {
     @State private var modelsError: String?
     @State private var showsAPIKey = false
     @State private var microphoneAllowed = DictationRecorder.hasPermission
+    @State private var lastKeyboardAccess = ConfigurationStorage.lastKeyboardAccess
 
     var body: some View {
         Form {
+            sharingSection
+
             Section {
                 HStack {
                     Group {
@@ -140,12 +143,45 @@ struct DictationSettingsView: View {
         .onAppear {
             settings = DictationSettingsStorage.load()
             microphoneAllowed = DictationRecorder.hasPermission
+            lastKeyboardAccess = ConfigurationStorage.lastKeyboardAccess
         }
         .onChange(of: settings) { newValue in
             DictationSettingsStorage.save(newValue)
         }
         .onChange(of: dictation.isSessionActive) { _ in
             microphoneAllowed = DictationRecorder.hasPermission
+        }
+    }
+
+    /// Comprueba que la app y el teclado comparten la carpeta donde se guarda la API key.
+    @ViewBuilder
+    private var sharingSection: some View {
+        if !ConfigurationStorage.isAppGroupAvailable {
+            Section {
+                Label("El teclado no puede leer estos ajustes", systemImage: "exclamationmark.triangle.fill")
+                    .foregroundColor(.red)
+            } header: {
+                Text("Conexión con el teclado")
+            } footer: {
+                Text("La app no tiene acceso al App Group «\(ConfigurationStorage.appGroupIdentifier ?? "sin configurar")», así que la API key se guarda solo en la app. Suele pasar cuando la herramienta con la que se firmó el IPA elimina los App Groups. Prueba con otra herramienta o con tu propio certificado. Los cambios de la distribución tampoco llegan al teclado mientras tanto.")
+            }
+        } else if let lastKeyboardAccess {
+            Section {
+                Label("El teclado comparte estos ajustes", systemImage: "checkmark.circle.fill")
+                    .foregroundColor(.green)
+            } header: {
+                Text("Conexión con el teclado")
+            } footer: {
+                Text("Último acceso del teclado: \(lastKeyboardAccess.formatted(date: .abbreviated, time: .shortened)).")
+            }
+        } else {
+            Section {
+                Label("El teclado aún no ha leído estos ajustes", systemImage: "questionmark.circle")
+            } header: {
+                Text("Conexión con el teclado")
+            } footer: {
+                Text("Abre el teclado Leonera con «Permitir acceso completo» activado en cualquier campo de texto y vuelve aquí. Si sigue sin aparecer, la app y el teclado no comparten el App Group (\(ConfigurationStorage.appGroupIdentifier ?? "sin configurar")).")
+            }
         }
     }
 

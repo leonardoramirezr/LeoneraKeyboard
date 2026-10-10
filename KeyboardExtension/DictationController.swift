@@ -118,6 +118,10 @@ final class DictationController: ObservableObject {
             message = "Activa «Permitir acceso completo» en Ajustes › General › Teclado › Teclados › Leonera para dictar."
             return
         }
+        guard ConfigurationStorage.isAppGroupAvailable else {
+            message = "El teclado no puede leer los ajustes de la app porque el App Group (\(ConfigurationStorage.appGroupIdentifier ?? "sin configurar")) no está disponible. Revisa que la herramienta con la que firmaste el IPA conserve los App Groups."
+            return
+        }
         guard !DictationSettingsStorage.load().trimmedAPIKey.isEmpty else {
             message = GroqError.missingAPIKey.errorDescription
             return
