@@ -183,6 +183,26 @@ struct KeyboardLayout: Codable, Hashable {
     var rows: [KeyRow]
 }
 
+/// Tipo de vibración al pulsar una tecla.
+enum HapticStyle: String, Codable, CaseIterable, Identifiable {
+    /// Pulso ligero del sistema (el que usaba el teclado hasta ahora).
+    case original
+    /// Vibración redondeada y suave.
+    case soft
+    /// Vibración seca y nítida.
+    case rigid
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .original: return "Original"
+        case .soft: return "Suave"
+        case .rigid: return "Rígido"
+        }
+    }
+}
+
 struct KeyboardSettings: Codable, Hashable {
     /// Activa mayúsculas automáticamente al empezar una frase.
     var autoCapitalize = true
@@ -190,6 +210,12 @@ struct KeyboardSettings: Codable, Hashable {
     var showLowercase = true
     /// Vibración al pulsar (requiere acceso completo).
     var haptics = true
+    /// Tipo de vibración.
+    var hapticStyle: HapticStyle = .original
+    /// Intensidad de la vibración, de 0.1 a 1.
+    var hapticIntensity: Double = 1
+    /// Duración de la vibración en milisegundos (0 = pulso breve del sistema).
+    var hapticDuration: Double = 0
     /// Sonido al pulsar (requiere acceso completo).
     var keyClicks = false
     /// Alto de cada fila en puntos.
@@ -200,7 +226,8 @@ struct KeyboardSettings: Codable, Hashable {
     init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case autoCapitalize, showLowercase, haptics, keyClicks, rowHeight, swipeThreshold
+        case autoCapitalize, showLowercase, haptics, hapticStyle, hapticIntensity, hapticDuration
+        case keyClicks, rowHeight, swipeThreshold
     }
 
     init(from decoder: Decoder) throws {
@@ -209,6 +236,9 @@ struct KeyboardSettings: Codable, Hashable {
         autoCapitalize = try container.decodeIfPresent(Bool.self, forKey: .autoCapitalize) ?? defaults.autoCapitalize
         showLowercase = try container.decodeIfPresent(Bool.self, forKey: .showLowercase) ?? defaults.showLowercase
         haptics = try container.decodeIfPresent(Bool.self, forKey: .haptics) ?? defaults.haptics
+        hapticStyle = (try? container.decode(HapticStyle.self, forKey: .hapticStyle)) ?? defaults.hapticStyle
+        hapticIntensity = try container.decodeIfPresent(Double.self, forKey: .hapticIntensity) ?? defaults.hapticIntensity
+        hapticDuration = try container.decodeIfPresent(Double.self, forKey: .hapticDuration) ?? defaults.hapticDuration
         keyClicks = try container.decodeIfPresent(Bool.self, forKey: .keyClicks) ?? defaults.keyClicks
         rowHeight = try container.decodeIfPresent(Double.self, forKey: .rowHeight) ?? defaults.rowHeight
         swipeThreshold = try container.decodeIfPresent(Double.self, forKey: .swipeThreshold) ?? defaults.swipeThreshold

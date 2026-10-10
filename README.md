@@ -28,8 +28,11 @@ La app incluye un editor donde se puede:
 
 - Editar cada tecla: acción principal, acción secundaria, etiqueta y ancho.
 - Añadir, eliminar, reordenar y mover teclas entre filas; añadir, mover y eliminar filas.
-- Ajustar mayúscula automática, minúsculas, vibración, sonido, alto de fila y
-  la distancia de deslizamiento.
+- Ajustar mayúscula automática, minúsculas, sonido, alto de fila y la distancia
+  de deslizamiento.
+- Configurar la vibración: tipo (Original, Suave o Rígido), intensidad y duración.
+  La vibración nunca hace esperar al teclado: se reproduce en segundo plano y cada
+  pulsación corta la vibración anterior.
 - Exportar e importar la configuración completa como JSON.
 - Restablecer la distribución por defecto.
 
@@ -38,8 +41,9 @@ de mayúsculas, intro, tabulador, ocultar teclado, siguiente teclado, emojis, pe
 copiar, cortar y mover el cursor.
 
 La app guarda la configuración en un App Group compartido
-(`group.com.leonera.keyboard`) y la extensión la lee cada vez que aparece el
-teclado.
+(`group.com.leonera.keyboard`) y la extensión la vuelve a leer cada vez que
+aparece el teclado, cuando la app que lo usa vuelve a primer plano y en cuanto la
+app avisa de un cambio, así que los ajustes se aplican sin reiniciar el teclado.
 
 ## Activar el teclado
 

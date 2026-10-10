@@ -7,10 +7,25 @@ final class KeyboardViewController: UIInputViewController {
     private var hostingController: UIHostingController<KeyboardRootView>?
     private var heightConstraint: NSLayoutConstraint?
     private var lastShiftTap = Date.distantPast
-    private lazy var feedback = UIImpactFeedbackGenerator(style: .light)
+    private let haptics = HapticFeedback()
+    private var configurationObserver: ConfigurationChangeObserver?
 
     override func viewDidLoad() {
         super.viewDidLoad()
+
+        // Los ajustes solo se leían en `viewWillAppear`, que no se llama al volver a primer
+        // plano con el teclado ya abierto, así que un cambio hecho en la app (p. ej. desactivar
+        // la vibración) no se aplicaba. Se recargan también al reactivarse la app anfitriona
+        // y en cuanto la app avisa de que guardó.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(reloadConfiguration),
+            name: .NSExtensionHostDidBecomeActive,
+            object: nil
+        )
+        configurationObserver = ConfigurationChangeObserver { [weak self] in
+            self?.reloadConfiguration()
+        }
 
         let root = KeyboardRootView(state: state) { [weak self] action in
             self?.perform(action)
@@ -43,11 +58,15 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        state.reload()
         state.showingEmoji = false
         state.needsInputModeSwitchKey = needsInputModeSwitchKey
-        heightConstraint?.constant = state.keyboardHeight
+        reloadConfiguration()
         updateAutoCapitalization()
+    }
+
+    @objc private func reloadConfiguration() {
+        state.reload()
+        heightConstraint?.constant = state.keyboardHeight
     }
 
     override func viewWillLayoutSubviews() {
@@ -192,12 +211,14 @@ final class KeyboardViewController: UIInputViewController {
         return lastNonSpace.isNewline || ".!?".contains(lastNonSpace)
     }
 
+    /// No espera a la vibración ni al sonido: ambos se reproducen en segundo plano.
     private func playFeedback() {
-        guard hasFullAccess else { return }
-        if state.settings.haptics {
-            feedback.impactOccurred()
+        let settings = state.settings
+        guard settings.haptics || settings.keyClicks, hasFullAccess else { return }
+        if settings.haptics {
+            haptics.play(settings)
         }
-        if state.settings.keyClicks {
+        if settings.keyClicks {
             AudioServicesPlaySystemSound(1104)
         }
     }
