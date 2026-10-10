@@ -65,8 +65,21 @@ El proyecto de Xcode no se guarda en el repositorio; se genera con XcodeGen
 ### GitHub Actions
 
 `.github/workflows/build.yml` se ejecuta en **cada push** a cualquier rama (no en
-los pull requests). Genera el proyecto, compila para `iphoneos` sin firmar y sube
-`LeoneraKeyboard-unsigned.ipa` como artefacto del workflow.
+los pull requests). Genera el proyecto, compila para `iphoneos` sin firmar y
+publica el IPA:
+
+| Origen | Etiqueta (tag) | Publicación |
+| --- | --- | --- |
+| Commit en `main` | `0.1.0`, `0.2.0`, `0.3.0`… (sube el número intermedio en cada push) | [Release](../../releases) estable, marcado como *Latest* |
+| Commit en otra rama | `build-<número de ejecución>-<commit>` (p. ej. `build-7-9fb81b8`) | Pre-release |
+
+Todas las etiquetas aparecen en [Tags](../../tags) y cada una tiene el IPA
+(`LeoneraKeyboard-<etiqueta>-unsigned.ipa`) adjunto en su release. La versión de
+la app (`CFBundleShortVersionString`) es la de la próxima release de `main`, y el
+número de build es el número de ejecución del workflow.
+
+Si un push a `main` incluye varios commits, se publica una sola release con el
+último de ellos.
 
 El IPA no está firmado: para instalarlo hay que firmarlo (por ejemplo con
 AltStore, Sideloadly o tu propio certificado). Asegúrate de que la herramienta
