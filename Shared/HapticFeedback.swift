@@ -113,7 +113,9 @@ private final class ContinuousHaptics {
 private extension HapticStyle {
     var impactStyle: UIImpactFeedbackGenerator.FeedbackStyle {
         switch self {
-        case .original: return .light
+        case .light: return .light
+        case .medium: return .medium
+        case .heavy: return .heavy
         case .soft: return .soft
         case .rigid: return .rigid
         }
@@ -122,7 +124,9 @@ private extension HapticStyle {
     /// Nitidez en Core Haptics: baja se siente redondeada, alta se siente seca.
     var sharpness: Float {
         switch self {
-        case .original: return 0.5
+        case .light: return 0.5
+        case .medium: return 0.4
+        case .heavy: return 0.3
         case .soft: return 0.1
         case .rigid: return 1
         }

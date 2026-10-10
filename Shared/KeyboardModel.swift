@@ -183,10 +183,13 @@ struct KeyboardLayout: Codable, Hashable {
     var rows: [KeyRow]
 }
 
-/// Tipo de vibración al pulsar una tecla.
+/// Tipo de vibración al pulsar una tecla. Corresponde a los estilos de
+/// `UIImpactFeedbackGenerator.FeedbackStyle`.
 enum HapticStyle: String, Codable, CaseIterable, Identifiable {
-    /// Pulso ligero del sistema (el que usaba el teclado hasta ahora).
-    case original
+    /// Pulso ligero (el que usaba el teclado originalmente).
+    case light
+    case medium
+    case heavy
     /// Vibración redondeada y suave.
     case soft
     /// Vibración seca y nítida.
@@ -196,10 +199,21 @@ enum HapticStyle: String, Codable, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
-        case .original: return "Original"
+        case .light: return "Ligero (original)"
+        case .medium: return "Medio"
+        case .heavy: return "Fuerte"
         case .soft: return "Suave"
         case .rigid: return "Rígido"
         }
+    }
+
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        // «original» era el nombre anterior de `light`.
+        guard let style = raw == "original" ? HapticStyle.light : HapticStyle(rawValue: raw) else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Tipo de vibración desconocido: \(raw)"))
+        }
+        self = style
     }
 }
 
@@ -211,7 +225,7 @@ struct KeyboardSettings: Codable, Hashable {
     /// Vibración al pulsar (requiere acceso completo).
     var haptics = true
     /// Tipo de vibración.
-    var hapticStyle: HapticStyle = .original
+    var hapticStyle: HapticStyle = .light
     /// Intensidad de la vibración, de 0.1 a 1.
     var hapticIntensity: Double = 1
     /// Duración de la vibración en milisegundos (0 = pulso breve del sistema).
