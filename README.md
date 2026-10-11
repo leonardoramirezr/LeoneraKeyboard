@@ -102,8 +102,8 @@ El proyecto de Xcode no se guarda en el repositorio; se genera con XcodeGen
 ### GitHub Actions
 
 `.github/workflows/build.yml` se ejecuta en **cada push** a cualquier rama (no en
-los pull requests). Genera el proyecto, compila para `iphoneos` sin firmar y
-publica el IPA:
+los pull requests). Genera el proyecto, compila para `iphoneos` sin certificado,
+firma los binarios *ad-hoc* con el App Group y publica el IPA:
 
 | Origen | Etiqueta (tag) | Publicación |
 | --- | --- | --- |
@@ -118,9 +118,11 @@ número de build es el número de ejecución del workflow.
 Si un push a `main` incluye varios commits, se publica una sola release con el
 último de ellos.
 
-El IPA no está firmado: para instalarlo hay que firmarlo (por ejemplo con
-AltStore, Sideloadly o tu propio certificado). Asegúrate de que la herramienta
-conserve el App Group; si no, el teclado funcionará con la distribución por
+El IPA no está firmado con ningún certificado: para instalarlo hay que firmarlo
+(por ejemplo con SideStore, AltStore, Sideloadly o tu propio certificado). La
+firma *ad-hoc* solo sirve para que el IPA declare el App Group
+(`com.apple.security.application-groups`): sin ella SideStore y AltStore no lo
+registran. Asegúrate de que la herramienta conserve el App Group; si no, el teclado funcionará con la distribución por
 defecto pero no verá los cambios hechos en la app ni la API key del dictado. Si la
 herramienta cambia el nombre del App Group (AltStore y SideStore, por ejemplo,
 le añaden el ID del equipo), la app y el teclado lo detectan solos a partir de
