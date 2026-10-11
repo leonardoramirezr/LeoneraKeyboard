@@ -34,6 +34,15 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
         AppGroupIdentifier: $(APP_GROUP_ID)
+        NSMicrophoneUsageDescription: Leonera Keyboard graba tu voz para dictar desde el teclado. El audio se envía a Groq para convertirlo en texto.
+        # El micrófono sigue activo en segundo plano para grabar cuando lo pida el teclado.
+        UIBackgroundModes:
+          - audio
+        # El teclado abre la app con leonerakeyboard://dictation para activar el micrófono.
+        CFBundleURLTypes:
+          - CFBundleURLName: com.leonera.keyboard
+            CFBundleURLSchemes:
+              - leonerakeyboard
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationLandscapeLeft
@@ -70,6 +79,7 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         AppGroupIdentifier: $(APP_GROUP_ID)
+        NSMicrophoneUsageDescription: Leonera Keyboard graba tu voz para dictar. El audio se envía a Groq para convertirlo en texto.
         NSExtension:
           NSExtensionPointIdentifier: com.apple.keyboard-service
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).KeyboardViewController

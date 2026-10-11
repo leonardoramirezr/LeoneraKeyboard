@@ -17,7 +17,8 @@ extension KeyboardLayout {
                        ("y", ">"), ("u", "ú"), ("i", "í"), ("o", "ó"), ("p", "•")])
 
         let middle = row([("a", "á"), ("s", "/"), ("d", ":"), ("f", ";"), ("g", "["),
-                          ("h", "]"), ("j", "¡"), ("k", "!"), ("l", "@"), ("ñ", "~")])
+                          ("h", "]"), ("j", "¡"), ("k", "!"), ("l", "@")])
+            + [KeyDefinition(primary: .character("ñ"), secondary: KeyAction(.dictation))]
 
         let bottom: [KeyDefinition] =
             [KeyDefinition(primary: KeyAction(.shift), width: 1.5)]

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var store: ConfigurationStore
+    @EnvironmentObject private var dictation: DictationService
     @State private var testText = ""
     @State private var confirmingReset = false
 
@@ -19,7 +20,7 @@ struct ContentView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("1. Abre Ajustes › General › Teclado › Teclados.")
                         Text("2. Pulsa «Añadir teclado» y elige «Leonera».")
-                        Text("3. Activa «Permitir acceso completo» para pegar, vibración y cargar tu distribución personalizada.")
+                        Text("3. Activa «Permitir acceso completo» para pegar, vibración, dictar y cargar tu distribución personalizada.")
                     }
                     .font(.callout)
 
@@ -47,6 +48,11 @@ struct ContentView: View {
                         Label("Ajustes del teclado", systemImage: "slider.horizontal.3")
                     }
                     NavigationLink {
+                        DictationSettingsView()
+                    } label: {
+                        Label("Dictado", systemImage: "mic")
+                    }
+                    NavigationLink {
                         ImportExportView()
                     } label: {
                         Label("Importar / exportar", systemImage: "square.and.arrow.up.on.square")
@@ -67,6 +73,10 @@ struct ContentView: View {
                 Button("Restablecer", role: .destructive) {
                     store.resetToDefault()
                 }
+            }
+            .sheet(isPresented: $dictation.showsSessionScreen) {
+                DictationSessionView()
+                    .environmentObject(dictation)
             }
         }
     }

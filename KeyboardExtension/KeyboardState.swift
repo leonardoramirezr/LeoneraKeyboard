@@ -6,6 +6,7 @@ final class KeyboardState: ObservableObject {
     @Published var rows: [KeyRow]
     @Published var shift: ShiftState = .off
     @Published var showingEmoji = false
+    @Published var showingDictation = false
 
     /// Indica si el sistema pide que el teclado muestre su propia tecla de cambio de teclado.
     var needsInputModeSwitchKey = false {
