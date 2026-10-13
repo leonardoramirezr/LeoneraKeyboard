@@ -3,25 +3,35 @@ name: Build
 # Se compila en cada commit enviado (push) a cualquier rama, no en los pull requests.
 # - Rama main: se publica un release estable 0.x.0 (0.1.0, 0.2.0, …).
 # - Otras ramas: se publica un pre-release con la etiqueta build-<número>-<commit>.
+#
+# Si están configurados los secrets de la clave de API de App Store Connect (ver
+# README › Instalación Ad Hoc), Xcode crea solo el App Group, los App ID, los perfiles
+# Ad Hoc y el certificado, firma el IPA y cada build (de main y de las demás ramas) se
+# publica en GitHub Pages, en una carpeta con el nombre de su etiqueta, para
+# instalarlo desde Safari. Si no, se genera sin firmar.
 on:
   push:
-    branches: ['**']
+    # gh-pages es la rama que sirve GitHub Pages: no se compila.
+    branches: ['**', '!gh-pages']
   workflow_dispatch:
 
 permissions:
   contents: write
 
+# No se cancela ningún build: cada push genera el suyo. Los de main van de uno en uno
+# para no calcular dos veces la misma versión; los de otras ramas, en paralelo.
 concurrency:
-  group: build-${{ github.ref }}
-  # En main no se cancela nada: cada commit debe generar su release (y así no
-  # se calculan dos versiones iguales a la vez).
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  group: build-${{ github.ref == 'refs/heads/main' && 'main' || github.run_id }}
+  cancel-in-progress: false
 
 jobs:
   build:
     name: Compilar y publicar
     runs-on: macos-15
     timeout-minutes: 30
+    permissions:
+      contents: write
+      pages: read
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -29,6 +39,29 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Detectar firma Ad Hoc
+        id: mode
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          missing=()
+          for name in ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8 APPLE_TEAM_ID; do
+            if [ -z "${!name}" ]; then missing+=("$name"); fi
+          done
+          if [ "${#missing[@]}" -eq 0 ]; then
+            echo "adhoc=true" >> "$GITHUB_OUTPUT"
+            echo "Se firmará Ad Hoc con la clave de API de App Store Connect."
+          elif [ "${#missing[@]}" -eq 4 ]; then
+            echo "adhoc=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Sin secrets de App Store Connect (ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8, APPLE_TEAM_ID): se genera un IPA sin firmar."
+          else
+            echo "::error::Faltan secrets de firma: ${missing[*]}."
+            exit 1
+          fi
 
       - name: Calcular versión y etiqueta
         id: version
@@ -51,22 +84,98 @@ jobs:
             release=false
           fi
 
+          if [ "${{ steps.mode.outputs.adhoc }}" = "true" ]; then
+            suffix=adhoc
+          else
+            suffix=unsigned
+          fi
+
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "release=$release" >> "$GITHUB_OUTPUT"
-          echo "ipa=LeoneraKeyboard-${tag}-unsigned.ipa" >> "$GITHUB_OUTPUT"
-          echo "Versión: $version · Etiqueta: $tag · Release estable: $release"
+          echo "ipa=LeoneraKeyboard-${tag}-${suffix}.ipa" >> "$GITHUB_OUTPUT"
+          echo "Versión: $version · Etiqueta: $tag · Release estable: $release · IPA: $suffix"
+
+      # Clave de API e identificadores. El bundle id es com.<usuario>.<repositorio> salvo
+      # que la variable del repositorio APP_BUNDLE_ID diga otro; el teclado añade
+      # .extension y el App Group es group.<bundle id>.
+      - name: Preparar clave de App Store Connect
+        id: signing
+        if: steps.mode.outputs.adhoc == 'true'
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APP_BUNDLE_ID: ${{ vars.APP_BUNDLE_ID }}
+        run: |
+          dir="$RUNNER_TEMP/private_keys"
+          key="$dir/AuthKey_$ASC_KEY_ID.p8"
+          mkdir -p "$dir"
+          # Se acepta el contenido del .p8 tal cual o codificado en base64.
+          if printf '%s' "$ASC_KEY_P8" | grep -q 'BEGIN PRIVATE KEY'; then
+            printf '%s\n' "$ASC_KEY_P8" > "$key"
+          else
+            printf '%s' "$ASC_KEY_P8" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          if ! openssl pkey -in "$key" -noout 2>/dev/null; then
+            echo "::error::ASC_KEY_P8 no es una clave privada válida: pega el contenido completo del archivo AuthKey_XXXX.p8."
+            exit 1
+          fi
+          if ! [[ "$APPLE_TEAM_ID" =~ ^[A-Z0-9]{10}$ ]]; then
+            echo "::error::APPLE_TEAM_ID debe tener 10 caracteres (letras mayúsculas y números)."
+            exit 1
+          fi
+          ASC_KEY_PATH="$key" python3 scripts/asc.py check
+
+          if [ -z "$APP_BUNDLE_ID" ]; then
+            owner=$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-')
+            repo=$(echo "${GITHUB_REPOSITORY#*/}" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-')
+            APP_BUNDLE_ID="com.$owner.$repo"
+          fi
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          echo "app_bundle_id=$APP_BUNDLE_ID" >> "$GITHUB_OUTPUT"
+          echo "extension_bundle_id=$APP_BUNDLE_ID.extension" >> "$GITHUB_OUTPUT"
+          echo "app_group=group.$APP_BUNDLE_ID" >> "$GITHUB_OUTPUT"
+          echo "App: $APP_BUNDLE_ID · Teclado: $APP_BUNDLE_ID.extension · App Group: group.$APP_BUNDLE_ID · Equipo: $APPLE_TEAM_ID"
+
+      # URL de GitHub Pages (o la que tendrá cuando se active sobre la rama gh-pages).
+      - name: URL de GitHub Pages
+        id: pages
+        if: steps.mode.outputs.adhoc == 'true'
+        run: |
+          url=$(gh api "repos/$GITHUB_REPOSITORY/pages" --jq .html_url 2>/dev/null) || url=""
+          if [[ "$url" != https://* ]]; then
+            owner=$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')
+            url="https://$owner.github.io/${GITHUB_REPOSITORY#*/}/"
+            echo "::warning::GitHub Pages no está activado: en Settings › Pages elige la rama gh-pages. Se usará $url"
+          fi
+          url="${url%/}/"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "install_url=$url${{ steps.version.outputs.tag }}/" >> "$GITHUB_OUTPUT"
+          echo "Página de instalación: $url${{ steps.version.outputs.tag }}/"
 
       - name: Instalar XcodeGen
         run: brew install xcodegen
 
       - name: Generar proyecto Xcode
-        run: xcodegen generate
+        run: |
+          xcodegen generate
+          # Con firma automática Xcode registra el App Group que diga el archivo de
+          # entitlements, así que se escribe el identificador real en lugar de la variable.
+          if [ "${{ steps.mode.outputs.adhoc }}" = "true" ]; then
+            for file in App/LeoneraKeyboard.entitlements KeyboardExtension/LeoneraKeyboardExtension.entitlements; do
+              GROUP="${{ steps.signing.outputs.app_group }}" perl -pi -e 's/\$\(APP_GROUP_ID\)/$ENV{GROUP}/g' "$file"
+              cat "$file"
+            done
+          fi
 
       - name: Versión de Xcode
         run: xcodebuild -version
 
       - name: Compilar (iphoneos, sin firma)
+        if: steps.mode.outputs.adhoc != 'true'
         run: |
           set -o pipefail
           xcodebuild \
@@ -83,11 +192,128 @@ jobs:
             CURRENT_PROJECT_VERSION=${{ github.run_number }} \
             build
 
+      # Para firmar el archive, xcodebuild crea un certificado de desarrollo en el
+      # llavero del runner; se anotan los que ya había para revocar solo el nuevo.
+      - name: Anotar certificados de desarrollo existentes
+        if: steps.mode.outputs.adhoc == 'true'
+        run: |
+          mkdir -p build/certs
+          security find-certificate -a -c "Apple Development" -p > build/certs/before.pem 2>/dev/null || true
+          grep -c 'BEGIN CERTIFICATE' build/certs/before.pem || true
+
+      # -allowProvisioningUpdates con la clave de API: Xcode registra los App ID, el App
+      # Group y sus capacidades, y crea los certificados y perfiles que falten.
+      - name: Archivar con firma automática
+        if: steps.mode.outputs.adhoc == 'true'
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -o pipefail
+          group="${{ steps.signing.outputs.app_group }}"
+          # La API de App Store Connect no permite crear ni asignar App Groups: si el
+          # perfil no lo incluye, hay que hacerlo una vez en el portal.
+          trap 'echo "::error::Si el error dice que el perfil no coincide con com.apple.security.application-groups: en developer.apple.com › Identifiers › App Groups crea $group y asígnalo (App Groups › Configure) a los App ID ${{ steps.signing.outputs.app_bundle_id }} y ${{ steps.signing.outputs.extension_bundle_id }}; después vuelve a ejecutar el workflow."' ERR
+          xcodebuild archive \
+            -project LeoneraKeyboard.xcodeproj \
+            -scheme LeoneraKeyboard \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            -archivePath build/LeoneraKeyboard.xcarchive \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "${{ steps.signing.outputs.key }}" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            CODE_SIGN_STYLE=Automatic \
+            APP_BUNDLE_ID=${{ steps.signing.outputs.app_bundle_id }} \
+            EXTENSION_BUNDLE_ID=${{ steps.signing.outputs.extension_bundle_id }} \
+            APP_GROUP_ID=${{ steps.signing.outputs.app_group }} \
+            MARKETING_VERSION=${{ steps.version.outputs.version }} \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }}
+
+      # Exportación Ad Hoc ("release-testing"): Xcode genera los perfiles Ad Hoc con
+      # todos los dispositivos registrados y firma con el certificado de distribución
+      # gestionado en la nube (por eso la clave necesita el rol Admin).
+      - name: Exportar IPA Ad Hoc
+        if: steps.mode.outputs.adhoc == 'true'
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -o pipefail
+          cat > build/ExportOptions.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>method</key>
+              <string>release-testing</string>
+              <key>signingStyle</key>
+              <string>automatic</string>
+              <key>teamID</key>
+              <string>$APPLE_TEAM_ID</string>
+              <key>thinning</key>
+              <string>&lt;none&gt;</string>
+          </dict>
+          </plist>
+          EOF
+          plutil -lint build/ExportOptions.plist
+          xcodebuild -exportArchive \
+            -archivePath build/LeoneraKeyboard.xcarchive \
+            -exportPath build/export \
+            -exportOptionsPlist build/ExportOptions.plist \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "${{ steps.signing.outputs.key }}" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+          ls -la build/export
+
+          # Comprobaciones: perfil Ad Hoc y App Group en la app y en el teclado.
+          mkdir -p build/check
+          unzip -q -o build/export/*.ipa -d build/check
+          APP=build/check/Payload/LeoneraKeyboard.app
+          for bundle in "$APP" "$APP/PlugIns/LeoneraKeyboardExtension.appex"; do
+            security cms -D -i "$bundle/embedded.mobileprovision" > build/check/profile.plist
+            python3 - "$(basename "$bundle")" build/check/profile.plist <<'EOF'
+          import plistlib, sys
+          with open(sys.argv[2], "rb") as f:
+              profile = plistlib.load(f)
+          devices = len(profile.get("ProvisionedDevices", []))
+          print(f"{sys.argv[1]}: perfil «{profile['Name']}», {devices} dispositivo(s)")
+          EOF
+            codesign -d --entitlements - "$bundle" 2>&1 | tee /dev/stderr | grep -q "${{ steps.signing.outputs.app_group }}"
+          done
+
+      - name: Revocar certificado de desarrollo temporal
+        if: always() && steps.signing.outputs.key != ''
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_PATH: ${{ steps.signing.outputs.key }}
+        run: |
+          mkdir -p build/certs
+          serials() {
+            awk -v out="$2" '/BEGIN CERTIFICATE/ {n++} n {print > (out "-" n ".pem")}' "$1"
+            for pem in "$2"-*.pem; do
+              [ -f "$pem" ] && openssl x509 -in "$pem" -noout -serial | cut -d= -f2
+            done | sort -u
+          }
+          security find-certificate -a -c "Apple Development" -p > build/certs/after.pem 2>/dev/null || true
+          touch build/certs/before.pem
+          new=$(comm -13 <(serials build/certs/before.pem build/certs/b) <(serials build/certs/after.pem build/certs/a))
+          python3 scripts/asc.py revoke-certs $new
+          rm -f "$ASC_KEY_PATH"
+
       # Sin firma, los binarios no llevan entitlements y SideStore/AltStore no saben
       # que hace falta un App Group: no lo registran y la app y el teclado no comparten
       # ajustes. La firma ad-hoc (sin certificado) incluye el App Group para que la
       # herramienta con la que se instale lo registre al volver a firmar.
-      - name: Firmar ad-hoc con el App Group
+      - name: Firmar sin certificado con el App Group
+        if: steps.mode.outputs.adhoc != 'true'
         run: |
           APP=build/Build/Products/Release-iphoneos/LeoneraKeyboard.app
           EXT="$APP/PlugIns/LeoneraKeyboardExtension.appex"
@@ -117,11 +343,15 @@ jobs:
 
       - name: Empaquetar IPA
         run: |
-          APP=build/Build/Products/Release-iphoneos/LeoneraKeyboard.app
-          test -d "$APP/PlugIns/LeoneraKeyboardExtension.appex"
-          mkdir -p Payload
-          cp -R "$APP" Payload/
-          zip -qry "${{ steps.version.outputs.ipa }}" Payload
+          if [ "${{ steps.mode.outputs.adhoc }}" = "true" ]; then
+            mv build/export/*.ipa "${{ steps.version.outputs.ipa }}"
+          else
+            APP=build/Build/Products/Release-iphoneos/LeoneraKeyboard.app
+            test -d "$APP/PlugIns/LeoneraKeyboardExtension.appex"
+            mkdir -p Payload
+            cp -R "$APP" Payload/
+            zip -qry "${{ steps.version.outputs.ipa }}" Payload
+          fi
 
       - name: Subir artefacto
         uses: actions/upload-artifact@v4
@@ -142,10 +372,51 @@ jobs:
       - name: Publicar build (otras ramas)
         if: steps.version.outputs.release != 'true'
         run: |
-          notes=$(printf 'Build automático de la rama `%s`.\n\nCommit: %s\n\n%s\n\nIPA sin firmar: hay que firmarlo para instalarlo.' \
-            "$GITHUB_REF_NAME" "$GITHUB_SHA" "$(git log -1 --pretty=%s)")
+          if [ "${{ steps.mode.outputs.adhoc }}" = "true" ]; then
+            signature='IPA firmado Ad Hoc: solo se instala en los dispositivos registrados en la cuenta de Apple Developer. Instalar desde el iPhone: ${{ steps.pages.outputs.install_url }}'
+          else
+            signature='IPA sin firmar: hay que firmarlo para instalarlo.'
+          fi
+          notes=$(printf 'Build automático de la rama `%s`.\n\nCommit: %s\n\n%s\n\n%s' \
+            "$GITHUB_REF_NAME" "$GITHUB_SHA" "$(git log -1 --pretty=%s)" "$signature")
           gh release create "${{ steps.version.outputs.tag }}" "${{ steps.version.outputs.ipa }}" \
             --target "$GITHUB_SHA" \
             --title "Build ${{ github.run_number }} (${GITHUB_REF_NAME}, ${GITHUB_SHA::7})" \
             --notes "$notes" \
             --prerelease
+
+      # Página de instalación OTA (itms-services) en la carpeta <etiqueta>/ de gh-pages.
+      - name: Publicar en GitHub Pages
+        if: steps.mode.outputs.adhoc == 'true'
+        env:
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          tag="${{ steps.version.outputs.tag }}"
+          ipa="${{ steps.version.outputs.ipa }}"
+          page="build/pages/$tag"
+          mkdir -p "$page"
+          cp "$ipa" "$page/"
+          icon=App/Assets.xcassets/AppIcon.appiconset/AppIcon.png
+          sips -z 57 57 "$icon" --out "$page/icon-57.png" > /dev/null
+          sips -z 512 512 "$icon" --out "$page/icon-512.png" > /dev/null
+          release=()
+          if [ "${{ steps.version.outputs.release }}" = "true" ]; then release=(--release); fi
+          python3 scripts/adhoc.py page \
+            --out-dir "$page" \
+            --base-url "${{ steps.pages.outputs.url }}" \
+            --tag "$tag" \
+            --ipa-name "$ipa" \
+            --bundle-id "${{ steps.signing.outputs.app_bundle_id }}" \
+            --version "${{ steps.version.outputs.version }}" \
+            --build "${{ github.run_number }}" \
+            --title "Leonera Keyboard" \
+            --branch "$GITHUB_REF_NAME" \
+            --commit "$GITHUB_SHA" \
+            --message "${COMMIT_MESSAGE:-$(git log -1 --pretty=%s)}" \
+            --repo-url "$REPO_URL" \
+            "${release[@]}"
+          plutil -lint "$page/manifest.plist"
+          scripts/publish-pages.sh "$page" "$tag"
+          echo "### Instalar ${tag}" >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ steps.pages.outputs.install_url }}" >> "$GITHUB_STEP_SUMMARY"

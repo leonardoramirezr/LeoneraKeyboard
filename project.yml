@@ -12,7 +12,10 @@ settings:
     CURRENT_PROJECT_VERSION: "1"
     CODE_SIGN_STYLE: Automatic
     TARGETED_DEVICE_FAMILY: "1,2"
-    # Cambia este identificador (y los bundle id) si usas tu propio equipo de desarrollo.
+    # Cambia estos identificadores si usas tu propio equipo de desarrollo en Xcode.
+    # En GitHub Actions, al firmar Ad Hoc se usan com.<usuario>.<repositorio> (ver README).
+    APP_BUNDLE_ID: com.leonera.keyboard
+    EXTENSION_BUNDLE_ID: $(APP_BUNDLE_ID).extension
     APP_GROUP_ID: group.com.leonera.keyboard
 
 targets:
@@ -24,7 +27,7 @@ targets:
       - Shared
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.leonera.keyboard
+        PRODUCT_BUNDLE_IDENTIFIER: $(APP_BUNDLE_ID)
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     info:
       path: App/Info.plist
@@ -70,7 +73,7 @@ targets:
       - Shared
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.leonera.keyboard.extension
+        PRODUCT_BUNDLE_IDENTIFIER: $(EXTENSION_BUNDLE_ID)
         APPLICATION_EXTENSION_API_ONLY: YES
     info:
       path: KeyboardExtension/Info.plist
