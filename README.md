@@ -172,7 +172,7 @@ builds publican a la vez, el segundo reintenta sobre la versión del primero.
 En cada build, `xcodebuild -allowProvisioningUpdates` con la clave de API:
 
 1. Registra (si no existen) los App ID de la app y del teclado con la capacidad
-   **App Groups** y el App Group.
+   **App Groups** (el grupo en sí hay que asignarlo a mano, ver abajo).
 2. Archiva la app firmada con un certificado de desarrollo temporal.
 3. Exporta el IPA Ad Hoc (`release-testing`): genera los perfiles Ad Hoc con
    **todos los dispositivos registrados** y firma con el certificado de
@@ -198,7 +198,11 @@ haya al menos un iPhone registrado.
    **Team Key** con rol **Admin** (hace falta para el certificado de distribución
    gestionado en la nube) y descarga el `.p8` (solo se puede descargar una vez).
    Anota el **Key ID** y el **Issuer ID**.
-3. Copia tu **Team ID** de
+3. **Una sola vez por app**, porque la API no permite gestionar App Groups: en
+   **Identifiers › App Groups** crea `group.<bundle id de la app>` y asígnalo
+   (*App Groups › Configure*) a los dos App ID (`<app>` y `<app>.extension`). Si
+   los App ID aún no existen, el primer build los crea y falla avisando de este paso.
+4. Copia tu **Team ID** de
    [Membership details](https://developer.apple.com/account#MembershipDetailsCard).
 
 #### 2. Secrets

@@ -211,6 +211,10 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -o pipefail
+          group="${{ steps.signing.outputs.app_group }}"
+          # La API de App Store Connect no permite crear ni asignar App Groups: si el
+          # perfil no lo incluye, hay que hacerlo una vez en el portal.
+          trap 'echo "::error::Si el error dice que el perfil no coincide con com.apple.security.application-groups: en developer.apple.com › Identifiers › App Groups crea $group y asígnalo (App Groups › Configure) a los App ID ${{ steps.signing.outputs.app_bundle_id }} y ${{ steps.signing.outputs.extension_bundle_id }}; después vuelve a ejecutar el workflow."' ERR
           xcodebuild archive \
             -project LeoneraKeyboard.xcodeproj \
             -scheme LeoneraKeyboard \
