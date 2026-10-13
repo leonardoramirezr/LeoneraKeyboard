@@ -5,21 +5,23 @@ name: Build
 # - Otras ramas: se publica un pre-release con la etiqueta build-<número>-<commit>.
 #
 # Si están configurados los secrets de firma (ver README › Instalación Ad Hoc), el IPA
-# se firma con el certificado Apple Distribution y los perfiles Ad Hoc, y en main se
-# publica en GitHub Pages para instalarlo desde Safari. Si no, se genera sin firmar.
+# se firma con el certificado Apple Distribution y los perfiles Ad Hoc, y cada build
+# (de main y de las demás ramas) se publica en GitHub Pages, en una carpeta con el
+# nombre de su etiqueta, para instalarlo desde Safari. Si no, se genera sin firmar.
 on:
   push:
-    branches: ['**']
+    # gh-pages es la rama que sirve GitHub Pages: no se compila.
+    branches: ['**', '!gh-pages']
   workflow_dispatch:
 
 permissions:
   contents: write
 
+# No se cancela ningún build: cada push genera el suyo. Los de main van de uno en uno
+# para no calcular dos veces la misma versión; los de otras ramas, en paralelo.
 concurrency:
-  group: build-${{ github.ref }}
-  # En main no se cancela nada: cada commit debe generar su release (y así no
-  # se calculan dos versiones iguales a la vez).
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  group: build-${{ github.ref == 'refs/heads/main' && 'main' || github.run_id }}
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -31,8 +33,6 @@ jobs:
       pages: read
     env:
       GH_TOKEN: ${{ github.token }}
-    outputs:
-      pages: ${{ steps.mode.outputs.adhoc == 'true' && github.ref == 'refs/heads/main' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -140,6 +140,22 @@ jobs:
           echo "dir=$dir" >> "$GITHUB_OUTPUT"
           echo "keychain=$keychain" >> "$GITHUB_OUTPUT"
           echo "identity=$identity" >> "$GITHUB_OUTPUT"
+
+      # URL de GitHub Pages (o la que tendrá cuando se active sobre la rama gh-pages).
+      - name: URL de GitHub Pages
+        id: pages
+        if: steps.mode.outputs.adhoc == 'true'
+        run: |
+          url=$(gh api "repos/$GITHUB_REPOSITORY/pages" --jq .html_url 2>/dev/null) || url=""
+          if [[ "$url" != https://* ]]; then
+            owner=$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')
+            url="https://$owner.github.io/${GITHUB_REPOSITORY#*/}/"
+            echo "::warning::GitHub Pages no está activado: en Settings › Pages elige la rama gh-pages. Se usará $url"
+          fi
+          url="${url%/}/"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "install_url=$url${{ steps.version.outputs.tag }}/" >> "$GITHUB_OUTPUT"
+          echo "Página de instalación: $url${{ steps.version.outputs.tag }}/"
 
       - name: Instalar XcodeGen
         run: brew install xcodegen
@@ -278,7 +294,7 @@ jobs:
         if: steps.version.outputs.release != 'true'
         run: |
           if [ "${{ steps.mode.outputs.adhoc }}" = "true" ]; then
-            signature='IPA firmado Ad Hoc: solo se instala en los dispositivos del perfil.'
+            signature='IPA firmado Ad Hoc: solo se instala en los dispositivos del perfil. Instalar desde el iPhone: ${{ steps.pages.outputs.install_url }}'
           else
             signature='IPA sin firmar: hay que firmarlo para instalarlo.'
           fi
@@ -290,56 +306,38 @@ jobs:
             --notes "$notes" \
             --prerelease
 
-      # Página de instalación OTA (itms-services): solo desde main y con firma Ad Hoc.
-      - name: Configurar GitHub Pages
-        id: pages
-        if: steps.mode.outputs.adhoc == 'true' && github.ref == 'refs/heads/main'
-        uses: actions/configure-pages@v5
-
-      - name: Generar página de instalación
-        if: steps.pages.outcome == 'success'
+      # Página de instalación OTA (itms-services) en la carpeta <etiqueta>/ de gh-pages.
+      - name: Publicar en GitHub Pages
+        if: steps.mode.outputs.adhoc == 'true'
+        env:
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
-          site=build/pages
-          mkdir -p "$site"
-          cp "${{ steps.version.outputs.ipa }}" "$site/LeoneraKeyboard.ipa"
+          tag="${{ steps.version.outputs.tag }}"
+          ipa="${{ steps.version.outputs.ipa }}"
+          page="build/pages/$tag"
+          mkdir -p "$page"
+          cp "$ipa" "$page/"
           icon=App/Assets.xcassets/AppIcon.appiconset/AppIcon.png
-          sips -z 57 57 "$icon" --out "$site/icon-57.png" > /dev/null
-          sips -z 512 512 "$icon" --out "$site/icon-512.png" > /dev/null
-          python3 scripts/adhoc.py site \
-            --out-dir "$site" \
-            --base-url "${{ steps.pages.outputs.base_url }}" \
-            --ipa-name LeoneraKeyboard.ipa \
+          sips -z 57 57 "$icon" --out "$page/icon-57.png" > /dev/null
+          sips -z 512 512 "$icon" --out "$page/icon-512.png" > /dev/null
+          release=()
+          if [ "${{ steps.version.outputs.release }}" = "true" ]; then release=(--release); fi
+          python3 scripts/adhoc.py page \
+            --out-dir "$page" \
+            --base-url "${{ steps.pages.outputs.url }}" \
+            --tag "$tag" \
+            --ipa-name "$ipa" \
             --bundle-id "${{ steps.signing.outputs.app_bundle_id }}" \
             --version "${{ steps.version.outputs.version }}" \
             --build "${{ github.run_number }}" \
             --title "Leonera Keyboard" \
-            --tag "${{ steps.version.outputs.tag }}" \
+            --branch "$GITHUB_REF_NAME" \
             --commit "$GITHUB_SHA" \
-            --repo-url "${{ github.server_url }}/${{ github.repository }}"
-          plutil -lint "$site/manifest.plist"
-          ls -la "$site"
-
-      - name: Subir página de instalación
-        if: steps.pages.outcome == 'success'
-        uses: actions/upload-pages-artifact@v4
-        with:
-          path: build/pages
-
-  pages:
-    name: Publicar en GitHub Pages
-    needs: build
-    if: needs.build.outputs.pages == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    concurrency:
-      group: pages
-      cancel-in-progress: false
-    steps:
-      - name: Desplegar
-        id: deployment
-        uses: actions/deploy-pages@v4
+            --message "${COMMIT_MESSAGE:-$(git log -1 --pretty=%s)}" \
+            --repo-url "$REPO_URL" \
+            "${release[@]}"
+          plutil -lint "$page/manifest.plist"
+          scripts/publish-pages.sh "$page" "$tag"
+          echo "### Instalar ${tag}" >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ steps.pages.outputs.install_url }}" >> "$GITHUB_STEP_SUMMARY"

@@ -93,7 +93,8 @@ app avisa de un cambio, así que los ajustes se aplican sin reiniciar el teclado
 | `KeyboardExtension/` | Extensión de teclado (`UIInputViewController` + SwiftUI) |
 | `App/` | App contenedora: instrucciones, prueba y editor |
 | `project.yml` | Definición del proyecto para [XcodeGen](https://github.com/yonaskolb/XcodeGen) |
-| `scripts/adhoc.py` | Validación de los perfiles Ad Hoc y generación de la página de instalación |
+| `scripts/adhoc.py` | Validación de los perfiles Ad Hoc y generación de las páginas de instalación |
+| `scripts/publish-pages.sh` | Publicación de cada build en la rama `gh-pages` |
 
 El proyecto de Xcode no se guarda en el repositorio; se genera con XcodeGen
 (herramienta de compilación únicamente, la app no tiene dependencias).
@@ -103,13 +104,19 @@ El proyecto de Xcode no se guarda en el repositorio; se genera con XcodeGen
 ### GitHub Actions
 
 `.github/workflows/build.yml` se ejecuta en **cada push** a cualquier rama (no en
-los pull requests). Genera el proyecto, compila para `iphoneos`, firma la app y
-publica el IPA:
+los pull requests ni en `gh-pages`). Genera el proyecto, compila para `iphoneos`,
+firma la app y publica el IPA. Ningún build se cancela: los de `main` se ejecutan
+de uno en uno (para no repetir versión) y los de otras ramas en paralelo.
 
 | Origen | Etiqueta (tag) | Publicación |
 | --- | --- | --- |
-| Commit en `main` | `0.1.0`, `0.2.0`, `0.3.0`… (sube el número intermedio en cada push) | [Release](../../releases) estable, marcado como *Latest*, y página de instalación en GitHub Pages (con firma Ad Hoc) |
+| Commit en `main` (p. ej. al hacer merge) | `0.1.0`, `0.2.0`, `0.3.0`… (sube el número intermedio en cada push) | [Release](../../releases) estable, marcado como *Latest* |
 | Commit en otra rama | `build-<número de ejecución>-<commit>` (p. ej. `build-7-9fb81b8`) | Pre-release |
+
+Con firma Ad Hoc, además, cada build (de `main` y de las demás ramas) se publica en
+GitHub Pages en una carpeta con el nombre de su etiqueta
+(`https://<usuario>.github.io/<repositorio>/<etiqueta>/`); ver
+[Instalación Ad Hoc](#instalación-ad-hoc-github-pages).
 
 Todas las etiquetas aparecen en [Tags](../../tags) y cada una tiene el IPA
 adjunto en su release: `LeoneraKeyboard-<etiqueta>-adhoc.ipa` si están configurados
@@ -138,11 +145,27 @@ Conexión con el teclado** indica si ambos comparten los ajustes.
 
 Con una cuenta del Apple Developer Program, el workflow firma el IPA con un
 certificado **Apple Distribution** y dos perfiles **Ad Hoc** (uno para la app y
-otro para la extensión del teclado). Cada push a `main` publica en GitHub Pages
-(`https://<usuario>.github.io/<repositorio>/`) una página con un botón
-**Instalar** que, abierta en Safari desde el iPhone, instala la app directamente
-(`itms-services`). Solo se instala en los dispositivos incluidos en los perfiles y
-no hace falta activar el modo de desarrollador.
+otro para la extensión del teclado) y publica **cada build** en GitHub Pages, con
+la misma nomenclatura que [Tags](../../tags):
+
+| Página | Contenido |
+| --- | --- |
+| `https://<usuario>.github.io/<repositorio>/` | Portada: botón para instalar la última versión estable de `main` y lista de todos los builds |
+| `…/0.3.0/` | Build de `main` (release estable) |
+| `…/build-7-9fb81b8/` | Build de otra rama |
+
+Cada carpeta tiene un botón **Instalar** que, abierto en Safari desde el iPhone,
+instala la app directamente (`itms-services`), además de su `manifest.plist` y el
+IPA `LeoneraKeyboard-<etiqueta>-adhoc.ipa`. Solo se instala en los dispositivos
+incluidos en los perfiles y no hace falta activar el modo de desarrollador. El
+enlace de cada build aparece también en el resumen de la ejecución en *Actions* y
+en las notas de los pre-releases.
+
+Las páginas se guardan en la rama `gh-pages` (`scripts/publish-pages.sh`), que
+tiene un solo commit que se reemplaza en cada publicación para que los IPA no se
+acumulen en el historial. Se conservan todas las versiones de `main` y los 50
+builds de otras ramas más recientes (los anteriores siguen en su release). Si dos
+builds publican a la vez, el segundo reintenta sobre la versión del primero.
 
 Los bundle id y el App Group se toman de los perfiles, así que no hay que tocar
 `project.yml`. `scripts/adhoc.py` comprueba antes de compilar que los perfiles sean
@@ -186,16 +209,17 @@ error.
 
 #### 3. GitHub Pages
 
-En *Settings › Pages › Build and deployment › Source* elige **GitHub Actions**.
-Solo `main` despliega en Pages (es la regla por defecto del entorno
-`github-pages`).
+El primer build firmado crea la rama `gh-pages`. Después, en *Settings › Pages ›
+Build and deployment*, elige **Source: Deploy from a branch** y **Branch:
+`gh-pages` / `(root)`**. Solo hay que hacerlo una vez; GitHub Pages se actualiza
+solo (en un par de minutos) con cada build.
 
 #### 4. Instalar
 
-Haz push a `main` (o ejecuta el workflow a mano en *Actions › Build › Run
-workflow* sobre `main`) y abre la página en **Safari** desde el iPhone. GitHub
-Pages guarda en caché la página unos minutos, así que justo después de un
-despliegue puede seguir mostrando la versión anterior.
+Haz push a cualquier rama o merge a `main` y abre en **Safari** desde el iPhone la
+portada o la carpeta del build. La portada puede tardar unos minutos en mostrar el
+build nuevo por la caché de GitHub Pages; la carpeta de cada build es nueva, así
+que no le afecta.
 
 Al tener otros bundle id, la app firmada Ad Hoc se instala aparte de la que
 hubieras instalado con SideStore/AltStore: exporta la configuración desde la app
