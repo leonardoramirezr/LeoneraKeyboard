@@ -34,6 +34,12 @@ for attempt in 1 2 3 4 5 6; do
     echo "La rama $branch no existe todavía: se crea."
   fi
 
+  # Solo se conservan las carpetas de builds (con build.json); lo demás (p. ej. código
+  # si la rama se creó a partir de main) se descarta y la portada se regenera.
+  for entry in "$work"/* "$work"/.[!.]*; do
+    [ -e "$entry" ] || continue
+    if [ ! -f "$entry/build.json" ]; then rm -rf "$entry"; fi
+  done
   rm -rf "${work:?}/$tag"
   cp -R "$build_dir" "$work/$tag"
   python3 "$script_dir/adhoc.py" index \
@@ -44,7 +50,7 @@ for attempt in 1 2 3 4 5 6; do
 
   rm -f "$index_file"
   tree=$(cd "$work" && export GIT_DIR=$git_dir GIT_WORK_TREE=$work GIT_INDEX_FILE=$index_file \
-    && git add -A && git write-tree)
+    && git add -A --force && git write-tree)
   commit=$(git -c user.name="github-actions[bot]" \
     -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
     commit-tree "$tree" -m "Publicar $tag")
