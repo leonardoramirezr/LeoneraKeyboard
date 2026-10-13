@@ -13,7 +13,7 @@ settings:
     CODE_SIGN_STYLE: Automatic
     TARGETED_DEVICE_FAMILY: "1,2"
     # Cambia estos identificadores si usas tu propio equipo de desarrollo en Xcode.
-    # En GitHub Actions, al firmar Ad Hoc se sustituyen por los de los perfiles.
+    # En GitHub Actions, al firmar Ad Hoc se usan com.<usuario>.<repositorio> (ver README).
     APP_BUNDLE_ID: com.leonera.keyboard
     EXTENSION_BUNDLE_ID: $(APP_BUNDLE_ID).extension
     APP_GROUP_ID: group.com.leonera.keyboard

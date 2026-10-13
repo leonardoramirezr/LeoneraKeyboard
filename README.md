@@ -93,7 +93,8 @@ app avisa de un cambio, así que los ajustes se aplican sin reiniciar el teclado
 | `KeyboardExtension/` | Extensión de teclado (`UIInputViewController` + SwiftUI) |
 | `App/` | App contenedora: instrucciones, prueba y editor |
 | `project.yml` | Definición del proyecto para [XcodeGen](https://github.com/yonaskolb/XcodeGen) |
-| `scripts/adhoc.py` | Validación de los perfiles Ad Hoc y generación de las páginas de instalación |
+| `scripts/adhoc.py` | Generación de las páginas de instalación |
+| `scripts/asc.py` | Cliente de la API de App Store Connect (comprobación de la clave y revocación del certificado temporal) |
 | `scripts/publish-pages.sh` | Publicación de cada build en la rama `gh-pages` |
 
 El proyecto de Xcode no se guarda en el repositorio; se genera con XcodeGen
@@ -143,10 +144,10 @@ Conexión con el teclado** indica si ambos comparten los ajustes.
 
 ### Instalación Ad Hoc (GitHub Pages)
 
-Con una cuenta del Apple Developer Program, el workflow firma el IPA con un
-certificado **Apple Distribution** y dos perfiles **Ad Hoc** (uno para la app y
-otro para la extensión del teclado) y publica **cada build** en GitHub Pages, con
-la misma nomenclatura que [Tags](../../tags):
+Con una cuenta del Apple Developer Program y una clave de la API de App Store
+Connect, el workflow firma el IPA Ad Hoc con la **firma automática de Xcode** y
+publica **cada build** en GitHub Pages, con la misma nomenclatura que
+[Tags](../../tags):
 
 | Página | Contenido |
 | --- | --- |
@@ -157,7 +158,8 @@ la misma nomenclatura que [Tags](../../tags):
 Cada carpeta tiene un botón **Instalar** que, abierto en Safari desde el iPhone,
 instala la app directamente (`itms-services`), además de su `manifest.plist` y el
 IPA `LeoneraKeyboard-<etiqueta>-adhoc.ipa`. Solo se instala en los dispositivos
-incluidos en los perfiles y no hace falta activar el modo de desarrollador. El
+registrados en la cuenta de Apple Developer y no hace falta activar el modo de
+desarrollador. El
 enlace de cada build aparece también en el resumen de la ejecución en *Actions* y
 en las notas de los pre-releases.
 
@@ -167,52 +169,59 @@ acumulen en el historial. Se conservan todas las versiones de `main` y los 50
 builds de otras ramas más recientes (los anteriores siguen en su release). Si dos
 builds publican a la vez, el segundo reintenta sobre la versión del primero.
 
-Los bundle id y el App Group se toman de los perfiles, así que no hay que tocar
-`project.yml`. `scripts/adhoc.py` comprueba antes de compilar que los perfiles sean
-Ad Hoc, que no hayan caducado, que incluyan el certificado del `.p12` y que la app
-y la extensión compartan el App Group.
+En cada build, `xcodebuild -allowProvisioningUpdates` con la clave de API:
 
-#### 1. Apple Developer ([Certificates, Identifiers & Profiles](https://developer.apple.com/account/resources))
+1. Registra (si no existen) los App ID de la app y del teclado con la capacidad
+   **App Groups** y el App Group.
+2. Archiva la app firmada con un certificado de desarrollo temporal.
+3. Exporta el IPA Ad Hoc (`release-testing`): genera los perfiles Ad Hoc con
+   **todos los dispositivos registrados** y firma con el certificado de
+   distribución gestionado en la nube por Apple.
+4. Revoca el certificado de desarrollo temporal (`scripts/asc.py`), para no
+   llegar al límite de certificados de la cuenta.
 
-1. **Identifiers › App Groups**: registra un grupo, p. ej.
-   `group.com.<tu-nombre>.leonerakeyboard`.
-2. **Identifiers › App IDs** (tipo *App*, *Explicit*): registra dos, ambos con la
-   capacidad **App Groups** activada y configurada con el grupo anterior:
-   - App: p. ej. `com.<tu-nombre>.leonerakeyboard`.
-   - Teclado: el mismo seguido de `.extension`, p. ej.
-     `com.<tu-nombre>.leonerakeyboard.extension` (debe empezar por el de la app).
-3. **Devices**: registra el UDID de cada iPhone/iPad (con el dispositivo conectado
-   al Mac, en Finder haz clic en el texto bajo el nombre del dispositivo hasta ver
-   el UDID; clic derecho para copiarlo).
-4. **Certificates**: crea un certificado **Apple Distribution** (en el Mac:
-   *Acceso a Llaveros › Asistente de certificados › Solicitar un certificado de
-   una autoridad de certificación*, guardado en disco). Descárgalo, ábrelo para
-   añadirlo al llavero y, en *Mis certificados*, expórtalo junto con su clave
-   privada como `.p12` con una contraseña.
-5. **Profiles**: crea dos perfiles **Ad Hoc** (en *Distribution*), uno con el App
-   ID de la app y otro con el del teclado, ambos con el certificado anterior y
-   los mismos dispositivos. Descarga los dos `.mobileprovision`.
+Antes de compilar, `scripts/asc.py check` comprueba que la clave funcione y que
+haya al menos un iPhone registrado.
 
-#### 2. Secrets del repositorio
+| Identificador | Valor |
+| --- | --- |
+| App | `com.<usuario>.<repositorio>` en minúsculas (p. ej. `com.leonardoramirezr.leonerakeyboard`), o el de la variable del repositorio `APP_BUNDLE_ID` |
+| Teclado | `<app>.extension` |
+| App Group | `group.<app>` |
 
-En *Settings › Secrets and variables › Actions › New repository secret*:
+#### 1. Apple Developer
+
+1. Registra el UDID de cada iPhone/iPad en
+   [Certificates, Identifiers & Profiles › Devices](https://developer.apple.com/account/resources/devices/list).
+2. En [App Store Connect › Users and Access › Integrations › App Store Connect
+   API](https://appstoreconnect.apple.com/access/integrations/api) crea una
+   **Team Key** con rol **Admin** (hace falta para el certificado de distribución
+   gestionado en la nube) y descarga el `.p8` (solo se puede descargar una vez).
+   Anota el **Key ID** y el **Issuer ID**.
+3. Copia tu **Team ID** de
+   [Membership details](https://developer.apple.com/account#MembershipDetailsCard).
+
+#### 2. Secrets
+
+En *Settings › Secrets and variables › Actions* (del repositorio, o de la
+organización si el repositorio pertenece a ella):
 
 | Secret | Valor |
 | --- | --- |
-| `ADHOC_CERTIFICATE_P12` | El `.p12` en base64: `base64 -i certificado.p12 \| pbcopy` |
-| `ADHOC_CERTIFICATE_PASSWORD` | La contraseña del `.p12` |
-| `ADHOC_PROFILE_APP` | El perfil de la app en base64: `base64 -i App_AdHoc.mobileprovision \| pbcopy` |
-| `ADHOC_PROFILE_EXTENSION` | El perfil del teclado en base64 |
+| `ASC_KEY_ID` | Key ID de la clave |
+| `ASC_ISSUER_ID` | Issuer ID |
+| `ASC_KEY_P8` | Contenido completo del archivo `AuthKey_<KeyID>.p8` (o en base64) |
+| `APPLE_TEAM_ID` | Team ID (10 caracteres) |
 
-Si falta alguno (pero no todos), el workflow falla para no publicar sin firma por
-error.
+Sin ninguno se genera el IPA sin firmar; si falta alguno (pero no todos), el
+workflow falla para no publicar sin firma por error. La clave tiene rol Admin:
+guárdala solo como secret.
 
 #### 3. GitHub Pages
 
 El primer build firmado crea la rama `gh-pages`. Después, en *Settings › Pages ›
 Build and deployment*, elige **Source: Deploy from a branch** y **Branch:
-`gh-pages` / `(root)`**. Solo hay que hacerlo una vez; GitHub Pages se actualiza
-solo (en un par de minutos) con cada build.
+`gh-pages` / `(root)`**. Solo hay que hacerlo una vez.
 
 #### 4. Instalar
 
@@ -225,17 +234,11 @@ Al tener otros bundle id, la app firmada Ad Hoc se instala aparte de la que
 hubieras instalado con SideStore/AltStore: exporta la configuración desde la app
 anterior e impórtala en la nueva, y vuelve a escribir la API key del dictado.
 
-#### Añadir un dispositivo o renovar
+#### Añadir un dispositivo
 
-1. Registra el UDID en **Devices**.
-2. En **Profiles**, edita los dos perfiles Ad Hoc, marca el dispositivo, guarda y
-   descárgalos de nuevo.
-3. Actualiza `ADHOC_PROFILE_APP` y `ADHOC_PROFILE_EXTENSION` y vuelve a ejecutar
-   el workflow.
-
-Los perfiles caducan al año y el certificado Apple Distribution también; el
-workflow avisa 30 días antes. Al renovar el certificado, regenera los perfiles con
-él y actualiza los cuatro secrets.
+Registra el UDID en **Devices** y haz un push (o ejecuta el workflow): el perfil
+Ad Hoc se regenera con todos los dispositivos registrados. Los builds anteriores
+no se pueden instalar en el dispositivo nuevo.
 
 ### En local (macOS)
 

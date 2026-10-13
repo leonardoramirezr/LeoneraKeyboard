@@ -4,10 +4,11 @@ name: Build
 # - Rama main: se publica un release estable 0.x.0 (0.1.0, 0.2.0, …).
 # - Otras ramas: se publica un pre-release con la etiqueta build-<número>-<commit>.
 #
-# Si están configurados los secrets de firma (ver README › Instalación Ad Hoc), el IPA
-# se firma con el certificado Apple Distribution y los perfiles Ad Hoc, y cada build
-# (de main y de las demás ramas) se publica en GitHub Pages, en una carpeta con el
-# nombre de su etiqueta, para instalarlo desde Safari. Si no, se genera sin firmar.
+# Si están configurados los secrets de la clave de API de App Store Connect (ver
+# README › Instalación Ad Hoc), Xcode crea solo el App Group, los App ID, los perfiles
+# Ad Hoc y el certificado, firma el IPA y cada build (de main y de las demás ramas) se
+# publica en GitHub Pages, en una carpeta con el nombre de su etiqueta, para
+# instalarlo desde Safari. Si no, se genera sin firmar.
 on:
   push:
     # gh-pages es la rama que sirve GitHub Pages: no se compila.
@@ -42,23 +43,23 @@ jobs:
       - name: Detectar firma Ad Hoc
         id: mode
         env:
-          CERTIFICATE: ${{ secrets.ADHOC_CERTIFICATE_P12 }}
-          CERTIFICATE_PASSWORD: ${{ secrets.ADHOC_CERTIFICATE_PASSWORD }}
-          APP_PROFILE: ${{ secrets.ADHOC_PROFILE_APP }}
-          EXTENSION_PROFILE: ${{ secrets.ADHOC_PROFILE_EXTENSION }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          configured=0
-          for value in "$CERTIFICATE" "$CERTIFICATE_PASSWORD" "$APP_PROFILE" "$EXTENSION_PROFILE"; do
-            if [ -n "$value" ]; then configured=$((configured + 1)); fi
+          missing=()
+          for name in ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8 APPLE_TEAM_ID; do
+            if [ -z "${!name}" ]; then missing+=("$name"); fi
           done
-          if [ "$configured" -eq 4 ]; then
+          if [ "${#missing[@]}" -eq 0 ]; then
             echo "adhoc=true" >> "$GITHUB_OUTPUT"
-            echo "Se firmará con el certificado y los perfiles Ad Hoc."
-          elif [ "$configured" -eq 0 ]; then
+            echo "Se firmará Ad Hoc con la clave de API de App Store Connect."
+          elif [ "${#missing[@]}" -eq 4 ]; then
             echo "adhoc=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Sin secrets de firma: se genera un IPA sin firmar."
+            echo "::notice::Sin secrets de App Store Connect (ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8, APPLE_TEAM_ID): se genera un IPA sin firmar."
           else
-            echo "::error::Faltan secrets de firma: hacen falta ADHOC_CERTIFICATE_P12, ADHOC_CERTIFICATE_PASSWORD, ADHOC_PROFILE_APP y ADHOC_PROFILE_EXTENSION."
+            echo "::error::Faltan secrets de firma: ${missing[*]}."
             exit 1
           fi
 
@@ -95,51 +96,49 @@ jobs:
           echo "ipa=LeoneraKeyboard-${tag}-${suffix}.ipa" >> "$GITHUB_OUTPUT"
           echo "Versión: $version · Etiqueta: $tag · Release estable: $release · IPA: $suffix"
 
-      # Llavero temporal con el certificado Apple Distribution. Los perfiles indican el
-      # equipo, los bundle id y el App Group con los que se compila.
-      - name: Preparar firma Ad Hoc
+      # Clave de API e identificadores. El bundle id es com.<usuario>.<repositorio> salvo
+      # que la variable del repositorio APP_BUNDLE_ID diga otro; el teclado añade
+      # .extension y el App Group es group.<bundle id>.
+      - name: Preparar clave de App Store Connect
         id: signing
         if: steps.mode.outputs.adhoc == 'true'
         env:
-          CERTIFICATE: ${{ secrets.ADHOC_CERTIFICATE_P12 }}
-          CERTIFICATE_PASSWORD: ${{ secrets.ADHOC_CERTIFICATE_PASSWORD }}
-          APP_PROFILE: ${{ secrets.ADHOC_PROFILE_APP }}
-          EXTENSION_PROFILE: ${{ secrets.ADHOC_PROFILE_EXTENSION }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APP_BUNDLE_ID: ${{ vars.APP_BUNDLE_ID }}
         run: |
-          dir="$RUNNER_TEMP/signing"
-          keychain="$dir/signing.keychain-db"
+          dir="$RUNNER_TEMP/private_keys"
+          key="$dir/AuthKey_$ASC_KEY_ID.p8"
           mkdir -p "$dir"
-          printf '%s' "$CERTIFICATE" | base64 --decode > "$dir/certificate.p12"
-          printf '%s' "$APP_PROFILE" | base64 --decode > "$dir/app.mobileprovision"
-          printf '%s' "$EXTENSION_PROFILE" | base64 --decode > "$dir/extension.mobileprovision"
-
-          keychain_password=$(openssl rand -hex 24)
-          security create-keychain -p "$keychain_password" "$keychain"
-          security set-keychain-settings -lut 21600 "$keychain"
-          security unlock-keychain -p "$keychain_password" "$keychain"
-          security import "$dir/certificate.p12" -P "$CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
-          security set-key-partition-list -S apple-tool:,apple: -k "$keychain_password" "$keychain" > /dev/null
-          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
-          rm "$dir/certificate.p12"
-
-          security find-identity -v -p codesigning "$keychain"
-          identity=$(security find-identity -v -p codesigning "$keychain" \
-            | awk '/"(Apple|iPhone) Distribution/ {print $2; exit}')
-          if [ -z "$identity" ]; then
-            echo "::error::El .p12 no contiene un certificado Apple Distribution con su clave privada."
+          # Se acepta el contenido del .p8 tal cual o codificado en base64.
+          if printf '%s' "$ASC_KEY_P8" | grep -q 'BEGIN PRIVATE KEY'; then
+            printf '%s\n' "$ASC_KEY_P8" > "$key"
+          else
+            printf '%s' "$ASC_KEY_P8" | base64 --decode > "$key"
+          fi
+          chmod 600 "$key"
+          if ! openssl pkey -in "$key" -noout 2>/dev/null; then
+            echo "::error::ASC_KEY_P8 no es una clave privada válida: pega el contenido completo del archivo AuthKey_XXXX.p8."
             exit 1
           fi
+          if ! [[ "$APPLE_TEAM_ID" =~ ^[A-Z0-9]{10}$ ]]; then
+            echo "::error::APPLE_TEAM_ID debe tener 10 caracteres (letras mayúsculas y números)."
+            exit 1
+          fi
+          ASC_KEY_PATH="$key" python3 scripts/asc.py check
 
-          group=$(awk '/^[[:space:]]+APP_GROUP_ID:/ {print $2}' project.yml)
-          python3 scripts/adhoc.py check \
-            --app-profile "$dir/app.mobileprovision" \
-            --extension-profile "$dir/extension.mobileprovision" \
-            --identity "$identity" \
-            --preferred-group "$group" \
-            --github-output "$GITHUB_OUTPUT"
-          echo "dir=$dir" >> "$GITHUB_OUTPUT"
-          echo "keychain=$keychain" >> "$GITHUB_OUTPUT"
-          echo "identity=$identity" >> "$GITHUB_OUTPUT"
+          if [ -z "$APP_BUNDLE_ID" ]; then
+            owner=$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-')
+            repo=$(echo "${GITHUB_REPOSITORY#*/}" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-')
+            APP_BUNDLE_ID="com.$owner.$repo"
+          fi
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          echo "app_bundle_id=$APP_BUNDLE_ID" >> "$GITHUB_OUTPUT"
+          echo "extension_bundle_id=$APP_BUNDLE_ID.extension" >> "$GITHUB_OUTPUT"
+          echo "app_group=group.$APP_BUNDLE_ID" >> "$GITHUB_OUTPUT"
+          echo "App: $APP_BUNDLE_ID · Teclado: $APP_BUNDLE_ID.extension · App Group: group.$APP_BUNDLE_ID · Equipo: $APPLE_TEAM_ID"
 
       # URL de GitHub Pages (o la que tendrá cuando se active sobre la rama gh-pages).
       - name: URL de GitHub Pages
@@ -161,24 +160,24 @@ jobs:
         run: brew install xcodegen
 
       - name: Generar proyecto Xcode
-        run: xcodegen generate
+        run: |
+          xcodegen generate
+          # Con firma automática Xcode registra el App Group que diga el archivo de
+          # entitlements, así que se escribe el identificador real en lugar de la variable.
+          if [ "${{ steps.mode.outputs.adhoc }}" = "true" ]; then
+            for file in App/LeoneraKeyboard.entitlements KeyboardExtension/LeoneraKeyboardExtension.entitlements; do
+              GROUP="${{ steps.signing.outputs.app_group }}" perl -pi -e 's/\$\(APP_GROUP_ID\)/$ENV{GROUP}/g' "$file"
+              cat "$file"
+            done
+          fi
 
       - name: Versión de Xcode
         run: xcodebuild -version
 
-      # Se compila siempre sin firma; con Ad Hoc se usan los identificadores de los
-      # perfiles y la firma se hace después con codesign.
       - name: Compilar (iphoneos, sin firma)
+        if: steps.mode.outputs.adhoc != 'true'
         run: |
           set -o pipefail
-          identifiers=()
-          if [ "${{ steps.mode.outputs.adhoc }}" = "true" ]; then
-            identifiers=(
-              APP_BUNDLE_ID=${{ steps.signing.outputs.app_bundle_id }}
-              EXTENSION_BUNDLE_ID=${{ steps.signing.outputs.extension_bundle_id }}
-              APP_GROUP_ID=${{ steps.signing.outputs.app_group }}
-            )
-          fi
           xcodebuild \
             -project LeoneraKeyboard.xcodeproj \
             -scheme LeoneraKeyboard \
@@ -191,43 +190,119 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             MARKETING_VERSION=${{ steps.version.outputs.version }} \
             CURRENT_PROJECT_VERSION=${{ github.run_number }} \
-            "${identifiers[@]}" \
             build
 
-      - name: Firmar Ad Hoc (Apple Distribution)
+      # Para firmar el archive, xcodebuild crea un certificado de desarrollo en el
+      # llavero del runner; se anotan los que ya había para revocar solo el nuevo.
+      - name: Anotar certificados de desarrollo existentes
         if: steps.mode.outputs.adhoc == 'true'
         run: |
-          dir="${{ steps.signing.outputs.dir }}"
-          keychain="${{ steps.signing.outputs.keychain }}"
-          identity="${{ steps.signing.outputs.identity }}"
-          group="${{ steps.signing.outputs.app_group }}"
-          APP=build/Build/Products/Release-iphoneos/LeoneraKeyboard.app
-          EXT="$APP/PlugIns/LeoneraKeyboardExtension.appex"
+          mkdir -p build/certs
+          security find-certificate -a -c "Apple Development" -p > build/certs/before.pem 2>/dev/null || true
+          grep -c 'BEGIN CERTIFICATE' build/certs/before.pem || true
 
-          for bundle in app extension; do
-            python3 scripts/adhoc.py entitlements \
-              --profile "$dir/$bundle.mobileprovision" --app-group "$group" \
-              --out "$dir/$bundle.entitlements"
+      # -allowProvisioningUpdates con la clave de API: Xcode registra los App ID, el App
+      # Group y sus capacidades, y crea los certificados y perfiles que falten.
+      - name: Archivar con firma automática
+        if: steps.mode.outputs.adhoc == 'true'
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -o pipefail
+          xcodebuild archive \
+            -project LeoneraKeyboard.xcodeproj \
+            -scheme LeoneraKeyboard \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            -archivePath build/LeoneraKeyboard.xcarchive \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "${{ steps.signing.outputs.key }}" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            CODE_SIGN_STYLE=Automatic \
+            APP_BUNDLE_ID=${{ steps.signing.outputs.app_bundle_id }} \
+            EXTENSION_BUNDLE_ID=${{ steps.signing.outputs.extension_bundle_id }} \
+            APP_GROUP_ID=${{ steps.signing.outputs.app_group }} \
+            MARKETING_VERSION=${{ steps.version.outputs.version }} \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }}
+
+      # Exportación Ad Hoc ("release-testing"): Xcode genera los perfiles Ad Hoc con
+      # todos los dispositivos registrados y firma con el certificado de distribución
+      # gestionado en la nube (por eso la clave necesita el rol Admin).
+      - name: Exportar IPA Ad Hoc
+        if: steps.mode.outputs.adhoc == 'true'
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -o pipefail
+          cat > build/ExportOptions.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>method</key>
+              <string>release-testing</string>
+              <key>signingStyle</key>
+              <string>automatic</string>
+              <key>teamID</key>
+              <string>$APPLE_TEAM_ID</string>
+              <key>thinning</key>
+              <string>&lt;none&gt;</string>
+          </dict>
+          </plist>
+          EOF
+          plutil -lint build/ExportOptions.plist
+          xcodebuild -exportArchive \
+            -archivePath build/LeoneraKeyboard.xcarchive \
+            -exportPath build/export \
+            -exportOptionsPlist build/ExportOptions.plist \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "${{ steps.signing.outputs.key }}" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+          ls -la build/export
+
+          # Comprobaciones: perfil Ad Hoc y App Group en la app y en el teclado.
+          mkdir -p build/check
+          unzip -q -o build/export/*.ipa -d build/check
+          APP=build/check/Payload/LeoneraKeyboard.app
+          for bundle in "$APP" "$APP/PlugIns/LeoneraKeyboardExtension.appex"; do
+            security cms -D -i "$bundle/embedded.mobileprovision" > build/check/profile.plist
+            python3 - "$(basename "$bundle")" build/check/profile.plist <<'EOF'
+          import plistlib, sys
+          with open(sys.argv[2], "rb") as f:
+              profile = plistlib.load(f)
+          devices = len(profile.get("ProvisionedDevices", []))
+          print(f"{sys.argv[1]}: perfil «{profile['Name']}», {devices} dispositivo(s)")
+          EOF
+            codesign -d --entitlements - "$bundle" 2>&1 | tee /dev/stderr | grep -q "${{ steps.signing.outputs.app_group }}"
           done
-          cp "$dir/app.mobileprovision" "$APP/embedded.mobileprovision"
-          cp "$dir/extension.mobileprovision" "$EXT/embedded.mobileprovision"
 
-          sign() {
-            codesign --force --sign "$identity" --keychain "$keychain" --timestamp=none \
-              --generate-entitlement-der "$@"
+      - name: Revocar certificado de desarrollo temporal
+        if: always() && steps.signing.outputs.key != ''
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_PATH: ${{ steps.signing.outputs.key }}
+        run: |
+          mkdir -p build/certs
+          serials() {
+            awk -v out="$2" '/BEGIN CERTIFICATE/ {n++} n {print > (out "-" n ".pem")}' "$1"
+            for pem in "$2"-*.pem; do
+              [ -f "$pem" ] && openssl x509 -in "$pem" -noout -serial | cut -d= -f2
+            done | sort -u
           }
-          # De dentro hacia fuera: la firma de cada bundle incluye la de lo que contiene.
-          if [ -d "$APP/Frameworks" ]; then
-            find "$APP/Frameworks" -maxdepth 1 \( -name '*.dylib' -o -name '*.framework' \) \
-              | while read -r item; do sign "$item"; done
-          fi
-          sign --entitlements "$dir/extension.entitlements" "$EXT"
-          sign --entitlements "$dir/app.entitlements" "$APP"
-
-          codesign --verify --deep --strict --verbose=2 "$APP"
-          for bundle in "$EXT" "$APP"; do
-            codesign -d --entitlements - "$bundle" 2>&1 | tee /dev/stderr | grep -q "$group"
-          done
+          security find-certificate -a -c "Apple Development" -p > build/certs/after.pem 2>/dev/null || true
+          touch build/certs/before.pem
+          new=$(comm -13 <(serials build/certs/before.pem build/certs/b) <(serials build/certs/after.pem build/certs/a))
+          python3 scripts/asc.py revoke-certs $new
+          rm -f "$ASC_KEY_PATH"
 
       # Sin firma, los binarios no llevan entitlements y SideStore/AltStore no saben
       # que hace falta un App Group: no lo registran y la app y el teclado no comparten
@@ -264,15 +339,15 @@ jobs:
 
       - name: Empaquetar IPA
         run: |
-          APP=build/Build/Products/Release-iphoneos/LeoneraKeyboard.app
-          test -d "$APP/PlugIns/LeoneraKeyboardExtension.appex"
-          mkdir -p Payload
-          cp -R "$APP" Payload/
-          zip -qry "${{ steps.version.outputs.ipa }}" Payload
-
-      - name: Borrar llavero temporal
-        if: always() && steps.signing.outputs.keychain != ''
-        run: security delete-keychain "${{ steps.signing.outputs.keychain }}" || true
+          if [ "${{ steps.mode.outputs.adhoc }}" = "true" ]; then
+            mv build/export/*.ipa "${{ steps.version.outputs.ipa }}"
+          else
+            APP=build/Build/Products/Release-iphoneos/LeoneraKeyboard.app
+            test -d "$APP/PlugIns/LeoneraKeyboardExtension.appex"
+            mkdir -p Payload
+            cp -R "$APP" Payload/
+            zip -qry "${{ steps.version.outputs.ipa }}" Payload
+          fi
 
       - name: Subir artefacto
         uses: actions/upload-artifact@v4
@@ -294,7 +369,7 @@ jobs:
         if: steps.version.outputs.release != 'true'
         run: |
           if [ "${{ steps.mode.outputs.adhoc }}" = "true" ]; then
-            signature='IPA firmado Ad Hoc: solo se instala en los dispositivos del perfil. Instalar desde el iPhone: ${{ steps.pages.outputs.install_url }}'
+            signature='IPA firmado Ad Hoc: solo se instala en los dispositivos registrados en la cuenta de Apple Developer. Instalar desde el iPhone: ${{ steps.pages.outputs.install_url }}'
           else
             signature='IPA sin firmar: hay que firmarlo para instalarlo.'
           fi

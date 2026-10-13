@@ -1,148 +1,22 @@
 #!/usr/bin/env python3
-"""Utilidades para firmar y publicar el IPA Ad Hoc (las usa .github/workflows/build.yml).
+"""Páginas de instalación Ad Hoc en GitHub Pages (las usa .github/workflows/build.yml).
 
 Subcomandos:
-  check         Valida el certificado y los perfiles Ad Hoc y obtiene de ellos el
-                equipo, los bundle id y el App Group con los que hay que compilar.
-  entitlements  Genera los entitlements de un bundle a partir de su perfil.
   page          Genera la carpeta de un build (manifest.plist, index.html, build.json)
                 para instalar el IPA desde Safari.
   index         Regenera la portada de GitHub Pages con todos los builds publicados.
 
-Solo usa la biblioteca estándar: los perfiles se leen extrayendo el plist que llevan
-dentro (igual que hace ConfigurationStorage en la app), sin `security cms`.
+Solo usa la biblioteca estándar.
 """
 
 import argparse
 import datetime
-import hashlib
 import html
 import json
 import pathlib
 import plistlib
 import shutil
-import sys
 import urllib.parse
-
-GROUPS_KEY = "com.apple.security.application-groups"
-
-
-def fail(message):
-    print(f"::error::{message}")
-    sys.exit(1)
-
-
-def load_profile(path):
-    with open(path, "rb") as f:
-        data = f.read()
-    start = data.find(b"<?xml")
-    end = data.find(b"</plist>", start)
-    if start < 0 or end < 0:
-        fail(f"{path} no parece un perfil de aprovisionamiento (.mobileprovision).")
-    return plistlib.loads(data[start:end + len(b"</plist>")])
-
-
-def profile_summary(label, profile):
-    """Valida que el perfil sea Ad Hoc y devuelve sus datos principales."""
-    name = profile.get("Name", "?")
-    entitlements = profile.get("Entitlements", {})
-    team = (profile.get("TeamIdentifier") or [""])[0]
-    app_identifier = entitlements.get("application-identifier", "")
-    prefix = (profile.get("ApplicationIdentifierPrefix") or [team])[0]
-    bundle_id = app_identifier[len(prefix) + 1:] if app_identifier.startswith(prefix + ".") else ""
-
-    if profile.get("ProvisionsAllDevices"):
-        fail(f"El perfil de la {label} («{name}») es Enterprise (In-House); hace falta uno Ad Hoc.")
-    if entitlements.get("get-task-allow"):
-        fail(f"El perfil de la {label} («{name}») es de desarrollo; hace falta uno de distribución Ad Hoc.")
-    devices = profile.get("ProvisionedDevices") or []
-    if not devices:
-        fail(f"El perfil de la {label} («{name}») no tiene dispositivos: es de App Store, no Ad Hoc.")
-    if not bundle_id or "*" in bundle_id:
-        fail(f"El perfil de la {label} («{name}») usa el App ID «{app_identifier}»; "
-             "hace falta un App ID explícito (sin *) con App Groups.")
-
-    expiration = profile.get("ExpirationDate")
-    expiration_text = f"{expiration:%Y-%m-%d}" if expiration else "?"
-    if expiration:
-        now = datetime.datetime.now(datetime.timezone.utc)
-        if expiration.tzinfo is None:
-            expiration = expiration.replace(tzinfo=datetime.timezone.utc)
-        if expiration <= now:
-            fail(f"El perfil de la {label} («{name}») caducó el {expiration_text}.")
-        if expiration - now < datetime.timedelta(days=30):
-            print(f"::warning::El perfil de la {label} («{name}») caduca el {expiration_text}.")
-
-    certificates = {hashlib.sha1(der).hexdigest().upper() for der in profile.get("DeveloperCertificates", [])}
-    print(f"Perfil de la {label}: «{name}» · {bundle_id} · equipo {team} · "
-          f"{len(devices)} dispositivo(s) · caduca {expiration_text}")
-    return {
-        "name": name,
-        "team": team,
-        "bundle_id": bundle_id,
-        "groups": list(entitlements.get(GROUPS_KEY) or []),
-        "devices": set(devices),
-        "certificates": certificates,
-    }
-
-
-def command_check(args):
-    app = profile_summary("app", load_profile(args.app_profile))
-    ext = profile_summary("extensión", load_profile(args.extension_profile))
-
-    if app["team"] != ext["team"]:
-        fail(f"Los perfiles son de equipos distintos ({app['team']} y {ext['team']}).")
-    if not ext["bundle_id"].startswith(app["bundle_id"] + "."):
-        fail(f"El bundle id de la extensión ({ext['bundle_id']}) debe empezar por el de la app "
-             f"seguido de un punto ({app['bundle_id']}.…).")
-
-    identity = args.identity.upper()
-    for label, summary in (("app", app), ("extensión", ext)):
-        if identity not in summary["certificates"]:
-            fail(f"El perfil de la {label} («{summary['name']}») no incluye el certificado del .p12 "
-                 f"(SHA-1 {identity}). Vuelve a generar el perfil con ese certificado.")
-
-    common = [group for group in app["groups"] if group in ext["groups"]]
-    if args.preferred_group in common:
-        group = args.preferred_group
-    elif len(common) == 1:
-        group = common[0]
-    elif not common:
-        fail("La app y la extensión no comparten ningún App Group. Activa App Groups en ambos App ID, "
-             "asígnales el mismo grupo y vuelve a generar los perfiles.")
-    else:
-        fail(f"La app y la extensión comparten varios App Groups ({', '.join(common)}); "
-             "deja solo uno o usa el de APP_GROUP_ID en project.yml.")
-
-    only_app = app["devices"] - ext["devices"]
-    only_ext = ext["devices"] - app["devices"]
-    if only_app or only_ext:
-        print("::warning::Los perfiles de la app y de la extensión no tienen los mismos dispositivos; "
-              "solo se podrá instalar en los que estén en ambos.")
-    devices = len(app["devices"] & ext["devices"])
-    print(f"App Group: {group} · se puede instalar en {devices} dispositivo(s)")
-
-    with open(args.github_output, "a") as out:
-        out.write(f"team_id={app['team']}\n")
-        out.write(f"app_bundle_id={app['bundle_id']}\n")
-        out.write(f"extension_bundle_id={ext['bundle_id']}\n")
-        out.write(f"app_group={group}\n")
-        out.write(f"devices={devices}\n")
-
-
-def command_entitlements(args):
-    profile = load_profile(args.profile)
-    entitlements = profile.get("Entitlements", {})
-    team = (profile.get("TeamIdentifier") or [""])[0]
-    result = {
-        "application-identifier": entitlements["application-identifier"],
-        "com.apple.developer.team-identifier": team,
-        "get-task-allow": False,
-        GROUPS_KEY: [args.app_group],
-    }
-    with open(args.out, "wb") as f:
-        plistlib.dump(result, f)
-
 
 STYLE = """
   :root {
@@ -406,20 +280,6 @@ def command_index(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest="command", required=True)
-
-    check = commands.add_parser("check")
-    check.add_argument("--app-profile", required=True)
-    check.add_argument("--extension-profile", required=True)
-    check.add_argument("--identity", required=True, help="SHA-1 del certificado de firma")
-    check.add_argument("--preferred-group", default="")
-    check.add_argument("--github-output", required=True)
-    check.set_defaults(func=command_check)
-
-    entitlements = commands.add_parser("entitlements")
-    entitlements.add_argument("--profile", required=True)
-    entitlements.add_argument("--app-group", required=True)
-    entitlements.add_argument("--out", required=True)
-    entitlements.set_defaults(func=command_entitlements)
 
     page = commands.add_parser("page")
     page.add_argument("--out-dir", required=True)
