@@ -93,6 +93,7 @@ app avisa de un cambio, así que los ajustes se aplican sin reiniciar el teclado
 | `KeyboardExtension/` | Extensión de teclado (`UIInputViewController` + SwiftUI) |
 | `App/` | App contenedora: instrucciones, prueba y editor |
 | `project.yml` | Definición del proyecto para [XcodeGen](https://github.com/yonaskolb/XcodeGen) |
+| `scripts/adhoc.py` | Validación de los perfiles Ad Hoc y generación de la página de instalación |
 
 El proyecto de Xcode no se guarda en el repositorio; se genera con XcodeGen
 (herramienta de compilación únicamente, la app no tiene dependencias).
@@ -102,32 +103,115 @@ El proyecto de Xcode no se guarda en el repositorio; se genera con XcodeGen
 ### GitHub Actions
 
 `.github/workflows/build.yml` se ejecuta en **cada push** a cualquier rama (no en
-los pull requests). Genera el proyecto, compila para `iphoneos` sin certificado,
-firma los binarios *ad-hoc* con el App Group y publica el IPA:
+los pull requests). Genera el proyecto, compila para `iphoneos`, firma la app y
+publica el IPA:
 
 | Origen | Etiqueta (tag) | Publicación |
 | --- | --- | --- |
-| Commit en `main` | `0.1.0`, `0.2.0`, `0.3.0`… (sube el número intermedio en cada push) | [Release](../../releases) estable, marcado como *Latest* |
+| Commit en `main` | `0.1.0`, `0.2.0`, `0.3.0`… (sube el número intermedio en cada push) | [Release](../../releases) estable, marcado como *Latest*, y página de instalación en GitHub Pages (con firma Ad Hoc) |
 | Commit en otra rama | `build-<número de ejecución>-<commit>` (p. ej. `build-7-9fb81b8`) | Pre-release |
 
 Todas las etiquetas aparecen en [Tags](../../tags) y cada una tiene el IPA
-(`LeoneraKeyboard-<etiqueta>-unsigned.ipa`) adjunto en su release. La versión de
-la app (`CFBundleShortVersionString`) es la de la próxima release de `main`, y el
-número de build es el número de ejecución del workflow.
+adjunto en su release: `LeoneraKeyboard-<etiqueta>-adhoc.ipa` si están configurados
+los secrets de firma (ver [Instalación Ad Hoc](#instalación-ad-hoc-github-pages)) o
+`LeoneraKeyboard-<etiqueta>-unsigned.ipa` si no. La versión de la app
+(`CFBundleShortVersionString`) es la de la próxima release de `main`, y el número
+de build es el número de ejecución del workflow.
 
 Si un push a `main` incluye varios commits, se publica una sola release con el
 último de ellos.
 
-El IPA no está firmado con ningún certificado: para instalarlo hay que firmarlo
-(por ejemplo con SideStore, AltStore, Sideloadly o tu propio certificado). La
-firma *ad-hoc* solo sirve para que el IPA declare el App Group
-(`com.apple.security.application-groups`): sin ella SideStore y AltStore no lo
+#### IPA sin firmar
+
+Sin los secrets de firma, el IPA no está firmado con ningún certificado: para
+instalarlo hay que firmarlo (por ejemplo con SideStore, AltStore o Sideloadly). Se
+firma sin certificado (`codesign --sign -`) solo para que declare el App Group
+(`com.apple.security.application-groups`): sin ello SideStore y AltStore no lo
 registran. Asegúrate de que la herramienta conserve el App Group; si no, el teclado funcionará con la distribución por
 defecto pero no verá los cambios hechos en la app ni la API key del dictado. Si la
 herramienta cambia el nombre del App Group (AltStore y SideStore, por ejemplo,
 le añaden el ID del equipo), la app y el teclado lo detectan solos a partir de
 `ALTAppGroups` o del perfil de aprovisionamiento. En la app, **Dictado ›
 Conexión con el teclado** indica si ambos comparten los ajustes.
+
+### Instalación Ad Hoc (GitHub Pages)
+
+Con una cuenta del Apple Developer Program, el workflow firma el IPA con un
+certificado **Apple Distribution** y dos perfiles **Ad Hoc** (uno para la app y
+otro para la extensión del teclado). Cada push a `main` publica en GitHub Pages
+(`https://<usuario>.github.io/<repositorio>/`) una página con un botón
+**Instalar** que, abierta en Safari desde el iPhone, instala la app directamente
+(`itms-services`). Solo se instala en los dispositivos incluidos en los perfiles y
+no hace falta activar el modo de desarrollador.
+
+Los bundle id y el App Group se toman de los perfiles, así que no hay que tocar
+`project.yml`. `scripts/adhoc.py` comprueba antes de compilar que los perfiles sean
+Ad Hoc, que no hayan caducado, que incluyan el certificado del `.p12` y que la app
+y la extensión compartan el App Group.
+
+#### 1. Apple Developer ([Certificates, Identifiers & Profiles](https://developer.apple.com/account/resources))
+
+1. **Identifiers › App Groups**: registra un grupo, p. ej.
+   `group.com.<tu-nombre>.leonerakeyboard`.
+2. **Identifiers › App IDs** (tipo *App*, *Explicit*): registra dos, ambos con la
+   capacidad **App Groups** activada y configurada con el grupo anterior:
+   - App: p. ej. `com.<tu-nombre>.leonerakeyboard`.
+   - Teclado: el mismo seguido de `.extension`, p. ej.
+     `com.<tu-nombre>.leonerakeyboard.extension` (debe empezar por el de la app).
+3. **Devices**: registra el UDID de cada iPhone/iPad (con el dispositivo conectado
+   al Mac, en Finder haz clic en el texto bajo el nombre del dispositivo hasta ver
+   el UDID; clic derecho para copiarlo).
+4. **Certificates**: crea un certificado **Apple Distribution** (en el Mac:
+   *Acceso a Llaveros › Asistente de certificados › Solicitar un certificado de
+   una autoridad de certificación*, guardado en disco). Descárgalo, ábrelo para
+   añadirlo al llavero y, en *Mis certificados*, expórtalo junto con su clave
+   privada como `.p12` con una contraseña.
+5. **Profiles**: crea dos perfiles **Ad Hoc** (en *Distribution*), uno con el App
+   ID de la app y otro con el del teclado, ambos con el certificado anterior y
+   los mismos dispositivos. Descarga los dos `.mobileprovision`.
+
+#### 2. Secrets del repositorio
+
+En *Settings › Secrets and variables › Actions › New repository secret*:
+
+| Secret | Valor |
+| --- | --- |
+| `ADHOC_CERTIFICATE_P12` | El `.p12` en base64: `base64 -i certificado.p12 \| pbcopy` |
+| `ADHOC_CERTIFICATE_PASSWORD` | La contraseña del `.p12` |
+| `ADHOC_PROFILE_APP` | El perfil de la app en base64: `base64 -i App_AdHoc.mobileprovision \| pbcopy` |
+| `ADHOC_PROFILE_EXTENSION` | El perfil del teclado en base64 |
+
+Si falta alguno (pero no todos), el workflow falla para no publicar sin firma por
+error.
+
+#### 3. GitHub Pages
+
+En *Settings › Pages › Build and deployment › Source* elige **GitHub Actions**.
+Solo `main` despliega en Pages (es la regla por defecto del entorno
+`github-pages`).
+
+#### 4. Instalar
+
+Haz push a `main` (o ejecuta el workflow a mano en *Actions › Build › Run
+workflow* sobre `main`) y abre la página en **Safari** desde el iPhone. GitHub
+Pages guarda en caché la página unos minutos, así que justo después de un
+despliegue puede seguir mostrando la versión anterior.
+
+Al tener otros bundle id, la app firmada Ad Hoc se instala aparte de la que
+hubieras instalado con SideStore/AltStore: exporta la configuración desde la app
+anterior e impórtala en la nueva, y vuelve a escribir la API key del dictado.
+
+#### Añadir un dispositivo o renovar
+
+1. Registra el UDID en **Devices**.
+2. En **Profiles**, edita los dos perfiles Ad Hoc, marca el dispositivo, guarda y
+   descárgalos de nuevo.
+3. Actualiza `ADHOC_PROFILE_APP` y `ADHOC_PROFILE_EXTENSION` y vuelve a ejecutar
+   el workflow.
+
+Los perfiles caducan al año y el certificado Apple Distribution también; el
+workflow avisa 30 días antes. Al renovar el certificado, regenera los perfiles con
+él y actualiza los cuatro secrets.
 
 ### En local (macOS)
 
@@ -138,4 +222,4 @@ open LeoneraKeyboard.xcodeproj
 ```
 
 En Xcode selecciona tu equipo en *Signing & Capabilities* para ambos targets. Si
-usas tu propio equipo, cambia los bundle id y `APP_GROUP_ID` en `project.yml`.
+usas tu propio equipo, cambia `APP_BUNDLE_ID` y `APP_GROUP_ID` en `project.yml`.

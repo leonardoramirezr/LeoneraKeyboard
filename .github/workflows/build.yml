@@ -3,6 +3,10 @@ name: Build
 # Se compila en cada commit enviado (push) a cualquier rama, no en los pull requests.
 # - Rama main: se publica un release estable 0.x.0 (0.1.0, 0.2.0, …).
 # - Otras ramas: se publica un pre-release con la etiqueta build-<número>-<commit>.
+#
+# Si están configurados los secrets de firma (ver README › Instalación Ad Hoc), el IPA
+# se firma con el certificado Apple Distribution y los perfiles Ad Hoc, y en main se
+# publica en GitHub Pages para instalarlo desde Safari. Si no, se genera sin firmar.
 on:
   push:
     branches: ['**']
@@ -22,13 +26,41 @@ jobs:
     name: Compilar y publicar
     runs-on: macos-15
     timeout-minutes: 30
+    permissions:
+      contents: write
+      pages: read
     env:
       GH_TOKEN: ${{ github.token }}
+    outputs:
+      pages: ${{ steps.mode.outputs.adhoc == 'true' && github.ref == 'refs/heads/main' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Detectar firma Ad Hoc
+        id: mode
+        env:
+          CERTIFICATE: ${{ secrets.ADHOC_CERTIFICATE_P12 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.ADHOC_CERTIFICATE_PASSWORD }}
+          APP_PROFILE: ${{ secrets.ADHOC_PROFILE_APP }}
+          EXTENSION_PROFILE: ${{ secrets.ADHOC_PROFILE_EXTENSION }}
+        run: |
+          configured=0
+          for value in "$CERTIFICATE" "$CERTIFICATE_PASSWORD" "$APP_PROFILE" "$EXTENSION_PROFILE"; do
+            if [ -n "$value" ]; then configured=$((configured + 1)); fi
+          done
+          if [ "$configured" -eq 4 ]; then
+            echo "adhoc=true" >> "$GITHUB_OUTPUT"
+            echo "Se firmará con el certificado y los perfiles Ad Hoc."
+          elif [ "$configured" -eq 0 ]; then
+            echo "adhoc=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Sin secrets de firma: se genera un IPA sin firmar."
+          else
+            echo "::error::Faltan secrets de firma: hacen falta ADHOC_CERTIFICATE_P12, ADHOC_CERTIFICATE_PASSWORD, ADHOC_PROFILE_APP y ADHOC_PROFILE_EXTENSION."
+            exit 1
+          fi
 
       - name: Calcular versión y etiqueta
         id: version
@@ -51,11 +83,63 @@ jobs:
             release=false
           fi
 
+          if [ "${{ steps.mode.outputs.adhoc }}" = "true" ]; then
+            suffix=adhoc
+          else
+            suffix=unsigned
+          fi
+
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "release=$release" >> "$GITHUB_OUTPUT"
-          echo "ipa=LeoneraKeyboard-${tag}-unsigned.ipa" >> "$GITHUB_OUTPUT"
-          echo "Versión: $version · Etiqueta: $tag · Release estable: $release"
+          echo "ipa=LeoneraKeyboard-${tag}-${suffix}.ipa" >> "$GITHUB_OUTPUT"
+          echo "Versión: $version · Etiqueta: $tag · Release estable: $release · IPA: $suffix"
+
+      # Llavero temporal con el certificado Apple Distribution. Los perfiles indican el
+      # equipo, los bundle id y el App Group con los que se compila.
+      - name: Preparar firma Ad Hoc
+        id: signing
+        if: steps.mode.outputs.adhoc == 'true'
+        env:
+          CERTIFICATE: ${{ secrets.ADHOC_CERTIFICATE_P12 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.ADHOC_CERTIFICATE_PASSWORD }}
+          APP_PROFILE: ${{ secrets.ADHOC_PROFILE_APP }}
+          EXTENSION_PROFILE: ${{ secrets.ADHOC_PROFILE_EXTENSION }}
+        run: |
+          dir="$RUNNER_TEMP/signing"
+          keychain="$dir/signing.keychain-db"
+          mkdir -p "$dir"
+          printf '%s' "$CERTIFICATE" | base64 --decode > "$dir/certificate.p12"
+          printf '%s' "$APP_PROFILE" | base64 --decode > "$dir/app.mobileprovision"
+          printf '%s' "$EXTENSION_PROFILE" | base64 --decode > "$dir/extension.mobileprovision"
+
+          keychain_password=$(openssl rand -hex 24)
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$dir/certificate.p12" -P "$CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+          security set-key-partition-list -S apple-tool:,apple: -k "$keychain_password" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          rm "$dir/certificate.p12"
+
+          security find-identity -v -p codesigning "$keychain"
+          identity=$(security find-identity -v -p codesigning "$keychain" \
+            | awk '/"(Apple|iPhone) Distribution/ {print $2; exit}')
+          if [ -z "$identity" ]; then
+            echo "::error::El .p12 no contiene un certificado Apple Distribution con su clave privada."
+            exit 1
+          fi
+
+          group=$(awk '/^[[:space:]]+APP_GROUP_ID:/ {print $2}' project.yml)
+          python3 scripts/adhoc.py check \
+            --app-profile "$dir/app.mobileprovision" \
+            --extension-profile "$dir/extension.mobileprovision" \
+            --identity "$identity" \
+            --preferred-group "$group" \
+            --github-output "$GITHUB_OUTPUT"
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
+          echo "keychain=$keychain" >> "$GITHUB_OUTPUT"
+          echo "identity=$identity" >> "$GITHUB_OUTPUT"
 
       - name: Instalar XcodeGen
         run: brew install xcodegen
@@ -66,9 +150,19 @@ jobs:
       - name: Versión de Xcode
         run: xcodebuild -version
 
+      # Se compila siempre sin firma; con Ad Hoc se usan los identificadores de los
+      # perfiles y la firma se hace después con codesign.
       - name: Compilar (iphoneos, sin firma)
         run: |
           set -o pipefail
+          identifiers=()
+          if [ "${{ steps.mode.outputs.adhoc }}" = "true" ]; then
+            identifiers=(
+              APP_BUNDLE_ID=${{ steps.signing.outputs.app_bundle_id }}
+              EXTENSION_BUNDLE_ID=${{ steps.signing.outputs.extension_bundle_id }}
+              APP_GROUP_ID=${{ steps.signing.outputs.app_group }}
+            )
+          fi
           xcodebuild \
             -project LeoneraKeyboard.xcodeproj \
             -scheme LeoneraKeyboard \
@@ -81,13 +175,50 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             MARKETING_VERSION=${{ steps.version.outputs.version }} \
             CURRENT_PROJECT_VERSION=${{ github.run_number }} \
+            "${identifiers[@]}" \
             build
+
+      - name: Firmar Ad Hoc (Apple Distribution)
+        if: steps.mode.outputs.adhoc == 'true'
+        run: |
+          dir="${{ steps.signing.outputs.dir }}"
+          keychain="${{ steps.signing.outputs.keychain }}"
+          identity="${{ steps.signing.outputs.identity }}"
+          group="${{ steps.signing.outputs.app_group }}"
+          APP=build/Build/Products/Release-iphoneos/LeoneraKeyboard.app
+          EXT="$APP/PlugIns/LeoneraKeyboardExtension.appex"
+
+          for bundle in app extension; do
+            python3 scripts/adhoc.py entitlements \
+              --profile "$dir/$bundle.mobileprovision" --app-group "$group" \
+              --out "$dir/$bundle.entitlements"
+          done
+          cp "$dir/app.mobileprovision" "$APP/embedded.mobileprovision"
+          cp "$dir/extension.mobileprovision" "$EXT/embedded.mobileprovision"
+
+          sign() {
+            codesign --force --sign "$identity" --keychain "$keychain" --timestamp=none \
+              --generate-entitlement-der "$@"
+          }
+          # De dentro hacia fuera: la firma de cada bundle incluye la de lo que contiene.
+          if [ -d "$APP/Frameworks" ]; then
+            find "$APP/Frameworks" -maxdepth 1 \( -name '*.dylib' -o -name '*.framework' \) \
+              | while read -r item; do sign "$item"; done
+          fi
+          sign --entitlements "$dir/extension.entitlements" "$EXT"
+          sign --entitlements "$dir/app.entitlements" "$APP"
+
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          for bundle in "$EXT" "$APP"; do
+            codesign -d --entitlements - "$bundle" 2>&1 | tee /dev/stderr | grep -q "$group"
+          done
 
       # Sin firma, los binarios no llevan entitlements y SideStore/AltStore no saben
       # que hace falta un App Group: no lo registran y la app y el teclado no comparten
       # ajustes. La firma ad-hoc (sin certificado) incluye el App Group para que la
       # herramienta con la que se instale lo registre al volver a firmar.
-      - name: Firmar ad-hoc con el App Group
+      - name: Firmar sin certificado con el App Group
+        if: steps.mode.outputs.adhoc != 'true'
         run: |
           APP=build/Build/Products/Release-iphoneos/LeoneraKeyboard.app
           EXT="$APP/PlugIns/LeoneraKeyboardExtension.appex"
@@ -123,6 +254,10 @@ jobs:
           cp -R "$APP" Payload/
           zip -qry "${{ steps.version.outputs.ipa }}" Payload
 
+      - name: Borrar llavero temporal
+        if: always() && steps.signing.outputs.keychain != ''
+        run: security delete-keychain "${{ steps.signing.outputs.keychain }}" || true
+
       - name: Subir artefacto
         uses: actions/upload-artifact@v4
         with:
@@ -142,10 +277,69 @@ jobs:
       - name: Publicar build (otras ramas)
         if: steps.version.outputs.release != 'true'
         run: |
-          notes=$(printf 'Build automático de la rama `%s`.\n\nCommit: %s\n\n%s\n\nIPA sin firmar: hay que firmarlo para instalarlo.' \
-            "$GITHUB_REF_NAME" "$GITHUB_SHA" "$(git log -1 --pretty=%s)")
+          if [ "${{ steps.mode.outputs.adhoc }}" = "true" ]; then
+            signature='IPA firmado Ad Hoc: solo se instala en los dispositivos del perfil.'
+          else
+            signature='IPA sin firmar: hay que firmarlo para instalarlo.'
+          fi
+          notes=$(printf 'Build automático de la rama `%s`.\n\nCommit: %s\n\n%s\n\n%s' \
+            "$GITHUB_REF_NAME" "$GITHUB_SHA" "$(git log -1 --pretty=%s)" "$signature")
           gh release create "${{ steps.version.outputs.tag }}" "${{ steps.version.outputs.ipa }}" \
             --target "$GITHUB_SHA" \
             --title "Build ${{ github.run_number }} (${GITHUB_REF_NAME}, ${GITHUB_SHA::7})" \
             --notes "$notes" \
             --prerelease
+
+      # Página de instalación OTA (itms-services): solo desde main y con firma Ad Hoc.
+      - name: Configurar GitHub Pages
+        id: pages
+        if: steps.mode.outputs.adhoc == 'true' && github.ref == 'refs/heads/main'
+        uses: actions/configure-pages@v5
+
+      - name: Generar página de instalación
+        if: steps.pages.outcome == 'success'
+        run: |
+          site=build/pages
+          mkdir -p "$site"
+          cp "${{ steps.version.outputs.ipa }}" "$site/LeoneraKeyboard.ipa"
+          icon=App/Assets.xcassets/AppIcon.appiconset/AppIcon.png
+          sips -z 57 57 "$icon" --out "$site/icon-57.png" > /dev/null
+          sips -z 512 512 "$icon" --out "$site/icon-512.png" > /dev/null
+          python3 scripts/adhoc.py site \
+            --out-dir "$site" \
+            --base-url "${{ steps.pages.outputs.base_url }}" \
+            --ipa-name LeoneraKeyboard.ipa \
+            --bundle-id "${{ steps.signing.outputs.app_bundle_id }}" \
+            --version "${{ steps.version.outputs.version }}" \
+            --build "${{ github.run_number }}" \
+            --title "Leonera Keyboard" \
+            --tag "${{ steps.version.outputs.tag }}" \
+            --commit "$GITHUB_SHA" \
+            --repo-url "${{ github.server_url }}/${{ github.repository }}"
+          plutil -lint "$site/manifest.plist"
+          ls -la "$site"
+
+      - name: Subir página de instalación
+        if: steps.pages.outcome == 'success'
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: build/pages
+
+  pages:
+    name: Publicar en GitHub Pages
+    needs: build
+    if: needs.build.outputs.pages == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - name: Desplegar
+        id: deployment
+        uses: actions/deploy-pages@v4
