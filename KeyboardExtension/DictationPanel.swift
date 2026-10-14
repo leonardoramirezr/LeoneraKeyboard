@@ -50,6 +50,9 @@ struct DictationPanel: View {
         case .idle:
             return dictation.message ?? "Toca el micrófono para dictar"
         case .starting:
+            if let startsAt = dictation.recordingStartsAt, startsAt > date {
+                return "Grabando en \(Int(startsAt.timeIntervalSince(date).rounded(.up))) s…"
+            }
             return "Activando el micrófono…"
         case .recording(let since):
             let seconds = max(0, Int(date.timeIntervalSince(since)))

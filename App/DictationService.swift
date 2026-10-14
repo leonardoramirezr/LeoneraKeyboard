@@ -72,7 +72,7 @@ final class DictationService: ObservableObject {
                     // desde una URL la app aún está «inactive», así que no se puede comprobar
                     // si está visible: se espera siempre a que pase a segundo plano.
                     self.recordsOnReturn = true
-                    self.update(DictationBridge.Status(phase: .ready))
+                    self.update(DictationBridge.Status(phase: .pending))
                     if UIApplication.shared.applicationState == .background {
                         self.scheduleCaptureAfterReturn()
                     }
@@ -97,7 +97,12 @@ final class DictationService: ObservableObject {
     }
 
     func cancelCapture() {
-        cancelPendingCapture()
+        if status.phase == .pending {
+            cancelPendingCapture()
+            update(DictationBridge.Status(phase: .ready))
+            restartIdleTimer()
+            return
+        }
         guard isRecording else { return publish() }
         _ = recorder.finishCapture()
         isRecording = false
@@ -117,6 +122,8 @@ final class DictationService: ObservableObject {
             self?.beginCapture()
         }
         pendingCapture = work
+        // El teclado muestra la pantalla de grabación en cuanto vuelve y cuenta la espera.
+        update(DictationBridge.Status(phase: .pending, startedAt: Date().addingTimeInterval(delay)))
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 

@@ -28,6 +28,9 @@ enum DictationBridge {
             case idle
             /// Micrófono activo, esperando a que el teclado pida grabar.
             case ready
+            /// El teclado abrió la app para grabar: la grabación empieza al volver al
+            /// teclado, en `startedAt` (si ya se sabe).
+            case pending
             case recording
             /// Grabación terminada: el audio está en `audioURL`.
             case finished
@@ -44,7 +47,7 @@ enum DictationBridge {
         /// Indica si la app tiene el micrófono activo y puede grabar sin abrirse.
         var isSessionActive: Bool {
             switch phase {
-            case .ready, .recording, .finished: return true
+            case .ready, .pending, .recording, .finished: return true
             case .idle, .failed: return false
             }
         }

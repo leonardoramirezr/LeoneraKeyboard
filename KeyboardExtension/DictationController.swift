@@ -28,6 +28,8 @@ final class DictationController: ObservableObject {
     @Published private(set) var phase: Phase = .idle
     /// Error o indicación que se muestra sobre el botón.
     @Published private(set) var message: String?
+    /// En `.starting`: cuándo empezará a grabar la app (tras la espera configurada).
+    @Published private(set) var recordingStartsAt: Date?
     /// Interruptor «Mejorar texto»: envía la transcripción al LLM con el prompt.
     @Published var improveText: Bool {
         didSet { DictationSettingsStorage.setImproveText(improveText) }
@@ -47,6 +49,8 @@ final class DictationController: ObservableObject {
     private var localRecordingUnavailable = false
     /// La app respondió que tiene el micrófono activo.
     private var appSessionActive = false
+    /// Se abrió la app para grabar: al volver al teclado se muestra la pantalla de grabación.
+    private var awaitingAppRecording = false
     /// Última grabación de la app ya procesada (o descartada).
     private var handledCaptureID: UUID?
     private var timeout: DispatchWorkItem?
@@ -79,6 +83,7 @@ final class DictationController: ObservableObject {
     func refresh() {
         let saved = DictationSettingsStorage.load().improveText
         if saved != improveText { improveText = saved }
+        if awaitingAppRecording, phase == .idle { showAppPending(startsAt: nil) }
         DarwinNotification.post(DictationBridge.pingNotification)
     }
 
@@ -101,6 +106,8 @@ final class DictationController: ObservableObject {
     /// Descarta la grabación o el procesamiento en curso.
     func cancel() {
         timeout?.cancel()
+        awaitingAppRecording = false
+        recordingStartsAt = nil
         task?.cancel()
         task = nil
         switch mode {
@@ -192,6 +199,7 @@ final class DictationController: ObservableObject {
     private func openApp() {
         phase = .idle
         if openURL(DictationBridge.recordURL) {
+            awaitingAppRecording = true
             message = "Se abrió Leonera Keyboard para activar el micrófono. Vuelve a esta app: la grabación empezará al volver."
         } else {
             mode = nil
@@ -202,8 +210,15 @@ final class DictationController: ObservableObject {
     private func appStatusDidChange() {
         let status = DictationBridge.readStatus()
         appSessionActive = status.isSessionActive
+        if status.phase != .pending {
+            awaitingAppRecording = false
+            recordingStartsAt = nil
+        }
 
         switch status.phase {
+        case .pending:
+            guard mode != .local, phase == .idle || phase == .starting else { return }
+            showAppPending(startsAt: status.startedAt)
         case .recording:
             guard mode != .local else { return }
             switch phase {
@@ -239,6 +254,22 @@ final class DictationController: ObservableObject {
         }
     }
 
+    /// La app empezará a grabar en cuanto termine la espera: se muestra ya la pantalla de grabación.
+    private func showAppPending(startsAt: Date?) {
+        mode = .app
+        message = nil
+        phase = .starting
+        recordingStartsAt = startsAt
+        onAppRecording()
+        let delay = startsAt.map { max(0, $0.timeIntervalSinceNow) }
+            ?? DictationSettingsStorage.load().recordingStartDelay
+        scheduleTimeout(seconds: delay + 3) { [weak self] in
+            guard let self, self.phase == .starting else { return }
+            self.awaitingAppRecording = false
+            self.fail("La app no empezó a grabar. Vuelve a tocar el botón.")
+        }
+    }
+
     // MARK: - Groq
 
     private func process(audioAt url: URL) {
@@ -270,6 +301,7 @@ final class DictationController: ObservableObject {
 
     private func fail(_ text: String) {
         timeout?.cancel()
+        recordingStartsAt = nil
         task = nil
         if mode == .local { recorder.stop() }
         mode = nil
