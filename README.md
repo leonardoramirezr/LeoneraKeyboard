@@ -75,7 +75,7 @@ una distribución guardada, la tecla Ñ no cambia: añade la acción «Dictar» 
 tecla que quieras desde el editor o restablece la distribución por defecto.
 
 La app guarda la configuración en un App Group compartido
-(`group.com.leonera.keyboard`) y la extensión la vuelve a leer cada vez que
+(`group.com.leonardoramirezr.leonerakeyboard`) y la extensión la vuelve a leer cada vez que
 aparece el teclado, cuando la app que lo usa vuelve a primer plano y en cuanto la
 app avisa de un cambio, así que los ajustes se aplican sin reiniciar el teclado.
 
@@ -186,9 +186,12 @@ haya al menos un iPhone registrado.
 
 | Identificador | Valor |
 | --- | --- |
-| App | `com.<usuario>.<repositorio>` en minúsculas (p. ej. `com.leonardoramirezr.leonerakeyboard`), o el de la variable del repositorio `APP_BUNDLE_ID` |
-| Teclado | `<app>.extension` |
-| App Group | `group.<app>` |
+| App | `com.leonardoramirezr.leonerakeyboard` |
+| Teclado | `com.leonardoramirezr.leonerakeyboard.extension` |
+| App Group | `group.com.leonardoramirezr.leonerakeyboard` |
+
+Son fijos: se definen en `project.yml` (`APP_BUNDLE_ID` y `APP_GROUP_ID`; el
+teclado es siempre `$(APP_BUNDLE_ID).extension`) y el workflow los lee de ahí.
 
 #### 1. Apple Developer
 
@@ -200,8 +203,9 @@ haya al menos un iPhone registrado.
    gestionado en la nube) y descarga el `.p8` (solo se puede descargar una vez).
    Anota el **Key ID** y el **Issuer ID**.
 3. **Una sola vez por app**, porque la API no permite gestionar App Groups: en
-   **Identifiers › App Groups** crea `group.<bundle id de la app>` y asígnalo
-   (*App Groups › Configure*) a los dos App ID (`<app>` y `<app>.extension`). Si
+   **Identifiers › App Groups** crea `group.com.leonardoramirezr.leonerakeyboard` y asígnalo
+   (*App Groups › Configure*) a los dos App ID (`com.leonardoramirezr.leonerakeyboard` y
+   `com.leonardoramirezr.leonerakeyboard.extension`). Si
    los App ID aún no existen, el primer build los crea y falla avisando de este paso.
 4. Copia tu **Team ID** de
    [Membership details](https://developer.apple.com/account#MembershipDetailsCard).
