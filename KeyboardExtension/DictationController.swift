@@ -192,7 +192,7 @@ final class DictationController: ObservableObject {
     private func openApp() {
         phase = .idle
         if openURL(DictationBridge.recordURL) {
-            message = "Se abrió Leonera Keyboard para activar el micrófono. Vuelve a esta app: la grabación ya habrá empezado."
+            message = "Se abrió Leonera Keyboard para activar el micrófono. Vuelve a esta app: la grabación empezará al volver."
         } else {
             mode = nil
             message = "No se pudo abrir Leonera Keyboard. Ábrela y toca «Activar micrófono» en Dictado."

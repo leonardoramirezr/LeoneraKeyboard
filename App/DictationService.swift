@@ -67,12 +67,15 @@ final class DictationService: ObservableObject {
                 try self.recorder.start()
                 self.isSessionActive = true
                 self.lastError = nil
-                if record, UIApplication.shared.applicationState == .active {
-                    // Se graba al volver al teclado, no mientras se ve esta pantalla.
+                if record {
+                    // Se graba al volver al teclado, no mientras se ve esta pantalla. Al abrirse
+                    // desde una URL la app aún está «inactive», así que no se puede comprobar
+                    // si está visible: se espera siempre a que pase a segundo plano.
                     self.recordsOnReturn = true
                     self.update(DictationBridge.Status(phase: .ready))
-                } else if record {
-                    self.beginCapture()
+                    if UIApplication.shared.applicationState == .background {
+                        self.scheduleCaptureAfterReturn()
+                    }
                 } else {
                     self.update(DictationBridge.Status(phase: .ready))
                     self.restartIdleTimer()
