@@ -38,11 +38,6 @@ struct DictationSessionView: View {
                 }
             }
             .padding()
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Listo") { dismiss() }
-                }
-            }
         }
     }
 
@@ -54,7 +49,7 @@ struct DictationSessionView: View {
 
     private var detail: String {
         if dictation.isSessionActive {
-            return "Vuelve a la app en la que estabas escribiendo (toca «◀︎» arriba a la izquierda) y termina la grabación desde el teclado. El micrófono seguirá activo en segundo plano para los siguientes dictados."
+            return "Vuelve a la app en la que estabas escribiendo (toca «◀︎» arriba a la izquierda o desliza la barra inferior hacia un lado para cambiar de app); la grabación empezará al volver al teclado. Termínala desde el teclado. El micrófono seguirá activo en segundo plano para los siguientes dictados."
         }
         return "Vuelve a tocar el botón de grabar en el teclado para activar el micrófono."
     }
