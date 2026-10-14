@@ -96,9 +96,19 @@ jobs:
           echo "ipa=LeoneraKeyboard-${tag}-${suffix}.ipa" >> "$GITHUB_OUTPUT"
           echo "Versión: $version · Etiqueta: $tag · Release estable: $release · IPA: $suffix"
 
-      # Clave de API e identificadores. El bundle id es com.<usuario>.<repositorio> salvo
-      # que la variable del repositorio APP_BUNDLE_ID diga otro; el teclado añade
-      # .extension y el App Group es group.<bundle id>.
+      # Identificadores fijos de project.yml: el teclado es <app>.extension.
+      - name: Identificadores
+        id: ids
+        run: |
+          read_setting() { awk -v key="$1" '$1 == key ":" {print $2; exit}' project.yml; }
+          app=$(read_setting APP_BUNDLE_ID)
+          group=$(read_setting APP_GROUP_ID)
+          test -n "$app" && test -n "$group"
+          echo "app_bundle_id=$app" >> "$GITHUB_OUTPUT"
+          echo "extension_bundle_id=$app.extension" >> "$GITHUB_OUTPUT"
+          echo "app_group=$group" >> "$GITHUB_OUTPUT"
+          echo "App: $app · Teclado: $app.extension · App Group: $group"
+
       - name: Preparar clave de App Store Connect
         id: signing
         if: steps.mode.outputs.adhoc == 'true'
@@ -107,7 +117,6 @@ jobs:
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APP_BUNDLE_ID: ${{ vars.APP_BUNDLE_ID }}
         run: |
           dir="$RUNNER_TEMP/private_keys"
           key="$dir/AuthKey_$ASC_KEY_ID.p8"
@@ -129,16 +138,8 @@ jobs:
           fi
           ASC_KEY_PATH="$key" python3 scripts/asc.py check
 
-          if [ -z "$APP_BUNDLE_ID" ]; then
-            owner=$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-')
-            repo=$(echo "${GITHUB_REPOSITORY#*/}" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-')
-            APP_BUNDLE_ID="com.$owner.$repo"
-          fi
           echo "key=$key" >> "$GITHUB_OUTPUT"
-          echo "app_bundle_id=$APP_BUNDLE_ID" >> "$GITHUB_OUTPUT"
-          echo "extension_bundle_id=$APP_BUNDLE_ID.extension" >> "$GITHUB_OUTPUT"
-          echo "app_group=group.$APP_BUNDLE_ID" >> "$GITHUB_OUTPUT"
-          echo "App: $APP_BUNDLE_ID · Teclado: $APP_BUNDLE_ID.extension · App Group: group.$APP_BUNDLE_ID · Equipo: $APPLE_TEAM_ID"
+          echo "Equipo: $APPLE_TEAM_ID"
 
       # URL de GitHub Pages (o la que tendrá cuando se active sobre la rama gh-pages).
       - name: URL de GitHub Pages
@@ -164,12 +165,10 @@ jobs:
           xcodegen generate
           # Con firma automática Xcode registra el App Group que diga el archivo de
           # entitlements, así que se escribe el identificador real en lugar de la variable.
-          if [ "${{ steps.mode.outputs.adhoc }}" = "true" ]; then
-            for file in App/LeoneraKeyboard.entitlements KeyboardExtension/LeoneraKeyboardExtension.entitlements; do
-              GROUP="${{ steps.signing.outputs.app_group }}" perl -pi -e 's/\$\(APP_GROUP_ID\)/$ENV{GROUP}/g' "$file"
-              cat "$file"
-            done
-          fi
+          for file in App/LeoneraKeyboard.entitlements KeyboardExtension/LeoneraKeyboardExtension.entitlements; do
+            GROUP="${{ steps.ids.outputs.app_group }}" perl -pi -e 's/\$\(APP_GROUP_ID\)/$ENV{GROUP}/g' "$file"
+            cat "$file"
+          done
 
       - name: Versión de Xcode
         run: xcodebuild -version
@@ -211,10 +210,10 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -o pipefail
-          group="${{ steps.signing.outputs.app_group }}"
+          group="${{ steps.ids.outputs.app_group }}"
           # La API de App Store Connect no permite crear ni asignar App Groups: si el
           # perfil no lo incluye, hay que hacerlo una vez en el portal.
-          trap 'echo "::error::Si el error dice que el perfil no coincide con com.apple.security.application-groups: en developer.apple.com › Identifiers › App Groups crea $group y asígnalo (App Groups › Configure) a los App ID ${{ steps.signing.outputs.app_bundle_id }} y ${{ steps.signing.outputs.extension_bundle_id }}; después vuelve a ejecutar el workflow."' ERR
+          trap 'echo "::error::Si el error dice que el perfil no coincide con com.apple.security.application-groups: en developer.apple.com › Identifiers › App Groups crea $group y asígnalo (App Groups › Configure) a los App ID ${{ steps.ids.outputs.app_bundle_id }} y ${{ steps.ids.outputs.extension_bundle_id }}; después vuelve a ejecutar el workflow."' ERR
           xcodebuild archive \
             -project LeoneraKeyboard.xcodeproj \
             -scheme LeoneraKeyboard \
@@ -228,9 +227,6 @@ jobs:
             -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
             CODE_SIGN_STYLE=Automatic \
-            APP_BUNDLE_ID=${{ steps.signing.outputs.app_bundle_id }} \
-            EXTENSION_BUNDLE_ID=${{ steps.signing.outputs.extension_bundle_id }} \
-            APP_GROUP_ID=${{ steps.signing.outputs.app_group }} \
             MARKETING_VERSION=${{ steps.version.outputs.version }} \
             CURRENT_PROJECT_VERSION=${{ github.run_number }}
 
@@ -285,7 +281,7 @@ jobs:
           devices = len(profile.get("ProvisionedDevices", []))
           print(f"{sys.argv[1]}: perfil «{profile['Name']}», {devices} dispositivo(s)")
           EOF
-            codesign -d --entitlements - "$bundle" 2>&1 | tee /dev/stderr | grep -q "${{ steps.signing.outputs.app_group }}"
+            codesign -d --entitlements - "$bundle" 2>&1 | tee /dev/stderr | grep -q "${{ steps.ids.outputs.app_group }}"
           done
 
       - name: Revocar certificado de desarrollo temporal
@@ -317,8 +313,7 @@ jobs:
         run: |
           APP=build/Build/Products/Release-iphoneos/LeoneraKeyboard.app
           EXT="$APP/PlugIns/LeoneraKeyboardExtension.appex"
-          GROUP=$(awk '/^[[:space:]]+APP_GROUP_ID:/ {print $2}' project.yml)
-          test -n "$GROUP"
+          GROUP="${{ steps.ids.outputs.app_group }}"
           mkdir -p signing
           cat > signing/entitlements.plist <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
@@ -407,7 +402,7 @@ jobs:
             --base-url "${{ steps.pages.outputs.url }}" \
             --tag "$tag" \
             --ipa-name "$ipa" \
-            --bundle-id "${{ steps.signing.outputs.app_bundle_id }}" \
+            --bundle-id "${{ steps.ids.outputs.app_bundle_id }}" \
             --version "${{ steps.version.outputs.version }}" \
             --build "${{ github.run_number }}" \
             --title "Leonera Keyboard" \

@@ -28,6 +28,9 @@ final class KeyboardViewController: UIInputViewController {
             self?.reloadConfiguration()
         }
         setUpDictation()
+        state.playKeyFeedback = { [weak self] in
+            self?.playFeedback()
+        }
 
         let root = KeyboardRootView(state: state, dictation: dictation) { [weak self] action in
             self?.perform(action)
@@ -100,8 +103,8 @@ final class KeyboardViewController: UIInputViewController {
 
     // MARK: - Acciones
 
+    /// La vibración no se reproduce aquí sino al tocar la tecla (`KeyboardState.playKeyFeedback`).
     func perform(_ action: KeyAction) {
-        playFeedback()
         let proxy = textDocumentProxy
 
         switch action.type {
