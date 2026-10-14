@@ -65,7 +65,7 @@ struct SettingsView: View {
                 }
                 VStack(alignment: .leading) {
                     Text("Sensibilidad del cursor: \(Int(store.configuration.settings.cursorSensitivity))")
-                    Slider(value: settings.cursorSensitivity, in: 1...10, step: 0.1) {
+                    Slider(value: settings.cursorSensitivity, in: 1.0...10.0, step: 0.1) {
                         Text("Sensibilidad del cursor")
                     } minimumValueLabel: {
                         Image(systemName: "tortoise")
