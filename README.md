@@ -32,7 +32,8 @@ La app incluye un editor donde se puede:
   de deslizamiento y la sensibilidad del cursor.
 - Mover el cursor como con un trackpad: al mantener pulsada la barra espaciadora
   las teclas se quedan vacías y arrastrar el dedo a izquierda o derecha mueve el
-  cursor, carácter a carácter, según la sensibilidad elegida.
+  cursor según la sensibilidad elegida. El movimiento se acelera con la velocidad
+  del dedo: despacio avanza con precisión y deprisa recorre mucho texto.
 - Configurar la vibración: tipo (Ligero, Medio, Fuerte, Suave o Rígido), intensidad y duración.
   La tecla vibra en cuanto se toca, tanto para el carácter principal como para el
   secundario (no espera a que se suelte). La vibración nunca hace esperar al teclado:

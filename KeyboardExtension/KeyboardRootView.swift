@@ -43,8 +43,13 @@ struct KeyCell: View {
     @State private var isTrackpad = false
     /// Desplazamiento horizontal del dedo en el último evento del gesto.
     @State private var dragX: CGFloat = 0
-    /// Posición horizontal a partir de la cual se cuenta el siguiente movimiento del cursor.
-    @State private var trackpadAnchorX: CGFloat = 0
+    /// Momento del último evento del gesto, para calcular la velocidad del dedo.
+    @State private var dragTime = Date()
+    /// Posición y momento del último evento procesado por el trackpad.
+    @State private var trackpadLastX: CGFloat = 0
+    @State private var trackpadLastTime = Date()
+    /// Recorrido acumulado (ya acelerado) que aún no llega a un carácter completo.
+    @State private var trackpadAccumulated: CGFloat = 0
 
     /// Tiempo que hay que mantener pulsada la barra espaciadora para activar el trackpad.
     private static let trackpadDelay: TimeInterval = 0.4
@@ -70,6 +75,7 @@ struct KeyCell: View {
             DragGesture(minimumDistance: 0, coordinateSpace: .local)
                 .onChanged { value in
                     dragX = value.translation.width
+                    dragTime = value.time
                     if !isPressed {
                         isPressed = true
                         state.playKeyFeedback()
@@ -143,7 +149,9 @@ struct KeyCell: View {
             trackpadTimer = nil
             guard isPressed, !isSwiping else { return }
             isTrackpad = true
-            trackpadAnchorX = dragX
+            trackpadLastX = dragX
+            trackpadLastTime = Date()
+            trackpadAccumulated = 0
             state.isTrackpadActive = true
             state.playKeyFeedback()
         }
@@ -156,17 +164,33 @@ struct KeyCell: View {
         trackpadTimer = nil
     }
 
-    /// Mueve el cursor un carácter por cada tramo que el dedo se ha desplazado desde
-    /// el último movimiento. El tamaño del tramo depende de la sensibilidad.
+    /// Mueve el cursor un carácter por cada tramo que recorre el dedo. El recorrido se
+    /// acelera según la velocidad: despacio el cursor avanza con precisión y deprisa
+    /// recorre muchos caracteres. El tamaño del tramo depende de la sensibilidad.
     private func moveCursor() {
+        let delta = dragX - trackpadLastX
+        let elapsed = max(dragTime.timeIntervalSince(trackpadLastTime), 0.001)
+        trackpadLastX = dragX
+        trackpadLastTime = dragTime
+        guard delta != 0 else { return }
+
+        let speed = abs(delta) / CGFloat(elapsed)
+        trackpadAccumulated += delta * Self.cursorAcceleration(forSpeed: speed)
+
         let step = CGFloat(state.settings.cursorPointsPerCharacter)
-        let steps = Int((dragX - trackpadAnchorX) / step)
+        let steps = Int(trackpadAccumulated / step)
         guard steps != 0 else { return }
-        trackpadAnchorX += CGFloat(steps) * step
+        trackpadAccumulated -= CGFloat(steps) * step
         let action = KeyAction(steps < 0 ? .cursorLeft : .cursorRight)
         for _ in 0..<abs(steps) {
             perform(action)
         }
+    }
+
+    /// Factor de aceleración según la velocidad del dedo en puntos por segundo:
+    /// 0,5 por debajo de 100 pt/s, 1 hacia 200 pt/s y hasta 5 a partir de 1000 pt/s.
+    private static func cursorAcceleration(forSpeed speed: CGFloat) -> CGFloat {
+        min(max(speed / 200, 0.5), 5)
     }
 
     private func endTrackpad() {
