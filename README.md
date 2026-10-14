@@ -28,8 +28,11 @@ La app incluye un editor donde se puede:
 
 - Editar cada tecla: acción principal, acción secundaria, etiqueta y ancho.
 - Añadir, eliminar, reordenar y mover teclas entre filas; añadir, mover y eliminar filas.
-- Ajustar mayúscula automática, minúsculas, sonido, alto de fila y la distancia
-  de deslizamiento.
+- Ajustar mayúscula automática, minúsculas, sonido, alto de fila, la distancia
+  de deslizamiento y la sensibilidad del cursor.
+- Mover el cursor como con un trackpad: al mantener pulsada la barra espaciadora
+  las teclas se quedan vacías y arrastrar el dedo a izquierda o derecha mueve el
+  cursor, carácter a carácter, según la sensibilidad elegida.
 - Configurar la vibración: tipo (Ligero, Medio, Fuerte, Suave o Rígido), intensidad y duración.
   La tecla vibra en cuanto se toca, tanto para el carácter principal como para el
   secundario (no espera a que se suelte). La vibración nunca hace esperar al teclado:
