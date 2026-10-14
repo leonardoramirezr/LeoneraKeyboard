@@ -38,10 +38,16 @@ struct DictationSessionView: View {
                 }
             }
             .padding()
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Listo") { dismiss() }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay(alignment: .bottomTrailing) {
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 56))
                 }
+                .accessibilityLabel("Listo")
+                .padding()
             }
         }
     }

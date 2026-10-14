@@ -9,6 +9,7 @@ struct DictationSettings: Codable, Equatable {
     static let defaultTranscriptionModel = "whisper-large-v3-turbo"
     static let defaultLanguageModel = "openai/gpt-oss-120b"
     static let defaultLanguage = "es"
+    static let defaultRecordingStartDelay: TimeInterval = 1
     static let defaultPrompt = """
     Eres un corrector de textos dictados por voz. Recibirás la transcripción literal de un audio. \
     Corrige la puntuación, los signos (incluidos los de apertura ¿ y ¡), los acentos, las mayúsculas \
@@ -31,11 +32,14 @@ struct DictationSettings: Codable, Equatable {
     var prompt = DictationSettings.defaultPrompt
     /// Estado del interruptor del panel de dictado.
     var improveText = false
+    /// Segundos que espera la app, tras volver al teclado, antes de empezar a grabar
+    /// cuando el teclado la abrió para activar el micrófono.
+    var recordingStartDelay = DictationSettings.defaultRecordingStartDelay
 
     init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case apiKey, customBaseURL, transcriptionModel, languageModel, language, prompt, improveText
+        case apiKey, customBaseURL, transcriptionModel, languageModel, language, prompt, improveText, recordingStartDelay
     }
 
     init(from decoder: Decoder) throws {
@@ -48,6 +52,7 @@ struct DictationSettings: Codable, Equatable {
         language = try container.decodeIfPresent(String.self, forKey: .language) ?? defaults.language
         prompt = try container.decodeIfPresent(String.self, forKey: .prompt) ?? defaults.prompt
         improveText = try container.decodeIfPresent(Bool.self, forKey: .improveText) ?? defaults.improveText
+        recordingStartDelay = try container.decodeIfPresent(TimeInterval.self, forKey: .recordingStartDelay) ?? defaults.recordingStartDelay
     }
 
     /// URL base que se usa en las peticiones, sin la barra final.

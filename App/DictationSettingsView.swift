@@ -127,6 +127,9 @@ struct DictationSettingsView: View {
                         Label("Activar micrófono", systemImage: "mic.badge.plus")
                     }
                 }
+                Stepper(value: $settings.recordingStartDelay, in: 0...5, step: 0.5) {
+                    Text("Esperar \(settings.recordingStartDelay.formatted()) s antes de grabar")
+                }
                 if let error = dictation.lastError {
                     Text(error)
                         .font(.footnote)
@@ -135,7 +138,7 @@ struct DictationSettingsView: View {
             } header: {
                 Text("Micrófono")
             } footer: {
-                Text("iOS no suele dejar que un teclado use el micrófono, así que esta app graba por él. La primera vez que dictes, el teclado abrirá esta app para activar el micrófono; vuelve a la app anterior y la grabación seguirá. El micrófono queda activo en segundo plano y se desactiva tras \(Int(DictationService.idleTimeout / 60)) minutos sin dictar. Dictar requiere «Permitir acceso completo».")
+                Text("iOS no suele dejar que un teclado use el micrófono, así que esta app graba por él. La primera vez que dictes, el teclado abrirá esta app para activar el micrófono; vuelve a la app anterior y la grabación empezará tras la espera configurada. El micrófono queda activo en segundo plano y se desactiva tras \(Int(DictationService.idleTimeout / 60)) minutos sin dictar. Dictar requiere «Permitir acceso completo».")
             }
         }
         .navigationTitle("Dictado")

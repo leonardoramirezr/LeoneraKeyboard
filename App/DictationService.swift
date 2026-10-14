@@ -20,6 +20,9 @@ final class DictationService: ObservableObject {
     private var observers: [DarwinNotificationObserver] = []
     private var idleTimer: Timer?
     private var audioObservers: [NSObjectProtocol] = []
+    /// Abierta desde el teclado: empieza a grabar cuando el usuario vuelva al teclado.
+    private var recordsOnReturn = false
+    private var pendingCapture: DispatchWorkItem?
 
     init() {
         observers = [
@@ -34,6 +37,11 @@ final class DictationService: ObservableObject {
                 self?.audioWasInterrupted()
             }
         }
+        audioObservers.append(NotificationCenter.default.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.scheduleCaptureAfterReturn()
+        })
         // La app acaba de arrancar: el micrófono no está activo.
         update(DictationBridge.Status())
     }
@@ -59,7 +67,11 @@ final class DictationService: ObservableObject {
                 try self.recorder.start()
                 self.isSessionActive = true
                 self.lastError = nil
-                if record {
+                if record, UIApplication.shared.applicationState == .active {
+                    // Se graba al volver al teclado, no mientras se ve esta pantalla.
+                    self.recordsOnReturn = true
+                    self.update(DictationBridge.Status(phase: .ready))
+                } else if record {
                     self.beginCapture()
                 } else {
                     self.update(DictationBridge.Status(phase: .ready))
@@ -73,6 +85,7 @@ final class DictationService: ObservableObject {
 
     /// Libera el micrófono.
     func endSession() {
+        cancelPendingCapture()
         idleTimer?.invalidate()
         recorder.stop()
         isSessionActive = false
@@ -81,6 +94,7 @@ final class DictationService: ObservableObject {
     }
 
     func cancelCapture() {
+        cancelPendingCapture()
         guard isRecording else { return publish() }
         _ = recorder.finishCapture()
         isRecording = false
@@ -90,7 +104,27 @@ final class DictationService: ObservableObject {
 
     // MARK: - Grabación
 
+    /// La app pasó a segundo plano: si el teclado pidió grabar, empieza tras el retardo configurado.
+    private func scheduleCaptureAfterReturn() {
+        guard recordsOnReturn else { return }
+        recordsOnReturn = false
+        let delay = max(0, DictationSettingsStorage.load().recordingStartDelay)
+        let work = DispatchWorkItem { [weak self] in
+            self?.pendingCapture = nil
+            self?.beginCapture()
+        }
+        pendingCapture = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private func cancelPendingCapture() {
+        recordsOnReturn = false
+        pendingCapture?.cancel()
+        pendingCapture = nil
+    }
+
     private func beginCapture() {
+        cancelPendingCapture()
         guard recorder.isRunning else {
             // iOS no deja activar el micrófono desde segundo plano: solo se reintenta
             // con la app visible. Si no, el teclado abrirá la app.
