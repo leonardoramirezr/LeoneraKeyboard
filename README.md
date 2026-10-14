@@ -31,8 +31,9 @@ La app incluye un editor donde se puede:
 - Ajustar mayúscula automática, minúsculas, sonido, alto de fila y la distancia
   de deslizamiento.
 - Configurar la vibración: tipo (Ligero, Medio, Fuerte, Suave o Rígido), intensidad y duración.
-  La vibración nunca hace esperar al teclado: se reproduce en segundo plano y cada
-  pulsación corta la vibración anterior.
+  La tecla vibra en cuanto se toca, tanto para el carácter principal como para el
+  secundario (no espera a que se suelte). La vibración nunca hace esperar al teclado:
+  se reproduce en segundo plano y cada pulsación corta la vibración anterior.
 - Exportar e importar la configuración completa como JSON.
 - Restablecer la distribución por defecto.
 

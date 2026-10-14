@@ -14,6 +14,7 @@ struct EmojiPanel: View {
                     ForEach(Self.emojis.indices, id: \.self) { index in
                         let emoji = Self.emojis[index]
                         Button {
+                            state.playKeyFeedback()
                             perform(.character(emoji))
                         } label: {
                             Text(emoji)
@@ -38,6 +39,7 @@ struct EmojiPanel: View {
     }
 
     private func handle(_ key: KeyDefinition) {
+        state.playKeyFeedback()
         if key.id == Self.closeKey.id {
             state.showingEmoji = false
         } else {

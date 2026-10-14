@@ -8,6 +8,10 @@ final class KeyboardState: ObservableObject {
     @Published var showingEmoji = false
     @Published var showingDictation = false
 
+    /// Vibración y sonido de tecla; lo asigna el controlador. Las teclas lo llaman en
+    /// cuanto se tocan, sin esperar a saber si es un toque o un deslizamiento.
+    var playKeyFeedback: () -> Void = {}
+
     /// Indica si el sistema pide que el teclado muestre su propia tecla de cambio de teclado.
     var needsInputModeSwitchKey = false {
         didSet { rebuildRows() }

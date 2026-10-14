@@ -25,8 +25,9 @@ struct KeyboardRootView: View {
 }
 
 /// Una tecla interactiva: tocar ejecuta la acción principal y deslizar hacia
-/// abajo ejecuta la secundaria. Las teclas de borrar o mover el cursor se repiten
-/// mientras se mantienen pulsadas.
+/// abajo ejecuta la secundaria. Vibra al tocarla, antes de saber cuál de las dos
+/// se ejecutará. Las teclas de borrar o mover el cursor se repiten mientras se
+/// mantienen pulsadas.
 struct KeyCell: View {
     let key: KeyDefinition
     @ObservedObject var state: KeyboardState
@@ -58,6 +59,7 @@ struct KeyCell: View {
                 .onChanged { value in
                     if !isPressed {
                         isPressed = true
+                        state.playKeyFeedback()
                         startRepeatingIfNeeded()
                     }
                     let swiping = isSwipe(value.translation)
@@ -92,6 +94,7 @@ struct KeyCell: View {
         let action = key.primary
         let timer = Timer(fire: Date().addingTimeInterval(0.45), interval: 0.08, repeats: true) { _ in
             didRepeat = true
+            state.playKeyFeedback()
             perform(action)
         }
         RunLoop.main.add(timer, forMode: .common)
